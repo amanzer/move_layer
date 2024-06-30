@@ -1,5 +1,14 @@
 # -*- coding: utf-8 -*-
 """
+
+/***************************************************************************
+ Move_layer
+                                 A QGIS plugin
+ Incorporate a mechanism to animate tgeompoint/tgeompoint layers in QGIS
+
+ ***************************************************************************/
+
+
 /***************************************************************************
  Move
                                  A QGIS plugin
@@ -37,6 +46,20 @@ from qgis.core import QgsProject
 from qgis.core import QgsTask
 from qgis.core import QgsVectorLayer
 from qgis.core import QgsWkbTypes
+from qgis.core import (
+
+    QgsFeature,
+    QgsField,
+    QgsCoordinateReferenceSystem,
+    QgsVectorLayerTemporalProperties,
+    QgsUnitTypes,
+    QgsDateTimeRange,
+    QgsInterval,
+    QgsGeometry,
+)
+from PyQt5.QtCore import QVariant
+
+
 
 # Initialize Qt resources from file resources.py
 from .resources import *
@@ -47,9 +70,26 @@ import psycopg2
 import uuid
 
 from .move_dockwidget import MoveDockWidget
-from .move_query import MoveQuery
-from .move_task import MoveGeomTask
-from .move_task import MoveTTask
+# from .move_query import MoveQuery
+# from .move_task import MoveGeomTask
+# from .move_task import MoveTTask
+
+
+from pymeos.db.psycopg import MobilityDB
+from pymeos import *
+from datetime import datetime, timedelta
+import time
+from pympler import asizeof
+from enum import Enum
+import numpy as np
+from shapely.geometry import Point
+import math
+import multiprocessing
+import logging
+
+from qgis.core import QgsVectorLayerTemporalProperties
+
+MODE_VARIABLE = QgsVectorLayerTemporalProperties.ModeFeatureDateTimeStartAndEndFromFields
 
 
 class Move:
@@ -87,10 +127,11 @@ class Move:
         self.toolbar = self.iface.addToolBar(u'Move')
         self.toolbar.setObjectName(u'Move')
 
-        #print "** INITIALIZING Move"
+        print("** INITIALIZING Move")
 
         self.pluginIsActive = False
         self.dockwidget = None
+        self.ran_once = False
 
     # noinspection PyMethodMayBeStatic
     def tr(self, message):
@@ -296,60 +337,61 @@ class Move:
     # Refresh materialized views of existing layers
     def refresh(self):
         self.dockwidget.button_refresh.setEnabled(False)
-        layer_name = self.iface.activeLayer().customProperty('move/view_name')
-        select_sql = f"refresh materialized view {layer_name};"
+        # layer_name = self.iface.activeLayer().customProperty('move/view_name')
+        # select_sql = f"refresh materialized view {layer_name};"
 
-        def run(task):
-            with psycopg2.connect(
-                    host=self.db['host'],
-                    port=self.db['port'],
-                    dbname=self.db['database'],
-                    user=self.db['username'],
-                    password=self.db['password']) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(select_sql)
-                    conn.commit()
+        # def run(task):
+        #     with psycopg2.connect(
+        #             host=self.db['host'],
+        #             port=self.db['port'],
+        #             dbname=self.db['database'],
+        #             user=self.db['username'],
+        #             password=self.db['password']) as conn:
+        #         with conn.cursor() as cur:
+        #             cur.execute(select_sql)
+        #             conn.commit()
 
-        def completed(exception):
-            self.dockwidget.button_refresh.setEnabled(True)
-            if exception is not None:
-                self.log(f"Exception: {exception}")
+        # def completed(exception):
+        #     self.dockwidget.button_refresh.setEnabled(True)
+        #     if exception is not None:
+        #         self.log(f"Exception: {exception}")
 
-        if layer_name is not None:
-            task = QgsTask.fromFunction(
-                'Move: Refresh Active Layer', run, on_finished=completed)
-            self.tm.addTask(task)
-        else:
-            self.dockwidget.button_refresh.setEnabled(True)
+        # if layer_name is not None:
+        #     task = QgsTask.fromFunction(
+        #         'Move: Refresh Active Layer', run, on_finished=completed)
+        #     self.tm.addTask(task)
+        # else:
+        self.dockwidget.button_refresh.setEnabled(True)
 
     # Drop unused materialized views
     def clean(self):
-        select_sql = f"""
-            select 'drop materialized view ' || relname || ';'
-            from pg_class
-            where relkind = 'm'
-            and relname like 'move@_{self.project_title}@_%' escape '@'
-        """
+        pass
+        # select_sql = f"""
+        #     select 'drop materialized view ' || relname || ';'
+        #     from pg_class
+        #     where relkind = 'm'
+        #     and relname like 'move@_{self.project_title}@_%' escape '@'
+        # """
 
-        view_names = self.get_layer_view_names()
-        if view_names:
-            select_sql += f" and relname not in ({view_names})"
+        # view_names = self.get_layer_view_names()
+        # if view_names:
+        #     select_sql += f" and relname not in ({view_names})"
 
-        try:
-            with psycopg2.connect(
-                    host=self.db['host'],
-                    port=self.db['port'],
-                    dbname=self.db['database'],
-                    user=self.db['username'],
-                    password=self.db['password']) as conn:
-                with conn.cursor() as cur:
-                    cur.execute(select_sql)
-                    drop_sqls = cur.fetchall()
-                    for drop_sql, in drop_sqls:
-                        cur.execute(drop_sql)
-                    conn.commit()
-        except psycopg2.Error as e:
-            pass
+        # try:
+        #     with psycopg2.connect(
+        #             host=self.db['host'],
+        #             port=self.db['port'],
+        #             dbname=self.db['database'],
+        #             user=self.db['username'],
+        #             password=self.db['password']) as conn:
+        #         with conn.cursor() as cur:
+        #             cur.execute(select_sql)
+        #             drop_sqls = cur.fetchall()
+        #             for drop_sql, in drop_sqls:
+        #                 cur.execute(drop_sql)
+        #             conn.commit()
+        # except psycopg2.Error as e:
+        #     pass
 
     def set_execute_enabled(self, enabled=True):
         self.dockwidget.button_execute.setEnabled(enabled)
@@ -357,40 +399,58 @@ class Move:
 
     # Execute current query
     def execute(self):
-        self.clean()
-        self.set_execute_enabled(False)
-        raw_sql = self.dockwidget.input_text.toPlainText()
-        if raw_sql:
-            query = MoveQuery(raw_sql)
-            if not query.is_valid:
-                self.log(f"Invalid Query: {query}")
-            else:
-                self.log(f"Running Query: {query}")
-                self.run_query(query)
-        self.set_execute_enabled(True)
+        # self.clean()
+        if not self.ran_once:
+            self.set_execute_enabled(False)
+            raw_sql = self.dockwidget.input_text.toPlainText()
+            
+            table, id_col, tpoint_col = raw_sql.split("|")
 
-    def run_query(self, query):
-        if not query.resolve_types(self.db):
-            self.log("Error: " + query.error_msg)
-            return
-        self.log("Query return types: " + ", ".join(query.column_types))
-        if query.has_geom_columns():
-            task = MoveGeomTask("Move: Creating geom view", query,
-                                self.project_title, self.db,
-                                self.add_geom_layers, self.raise_error)
-            self.tm.addTask(task)
-        if query.has_temp_columns():
-            temp_cols = query.temp_cols()
-            for col in temp_cols:
-                if query.column_types[col] == 'tgeometry':
-                    task = MoveTTask(f"Move: Creating tgeom view {col}", query,
-                                     self.project_title, self.db, col,
-                                     self.add_tgeom_layer, self.raise_error)
-                else:
-                    task = MoveTTask(f"Move: Creating tpoint view {col}",
-                                     query, self.project_title, self.db, col,
-                                     self.add_tpoint_layer, self.raise_error)
-                self.tm.addTask(task)
+            self.log(f"ID Column: {id_col}")
+            self.log(f"TPoint Column: {tpoint_col}")
+            self.log(f"db params : {self.db_params}")
+            connection_params = {
+                'host': self.db['host'],
+                'port': self.db['port'],
+                'dbname': self.db['database'],
+                'user': self.db['username'],
+                'password': self.db['password']
+            }
+            self.log(f"Connection params: {connection_params}")
+            # if raw_sql:
+            #     query = MoveQuery(raw_sql)
+            #     if not query.is_valid:
+            #         self.log(f"Invalid Query: {query}")
+            #     else:
+            #         self.log(f"Running Query: {query}")
+            #         self.log(f"Query informations : {str(query)}")
+            #         # self.run_query(query)
+
+            self.ran_once = True
+            self.set_execute_enabled(True)
+
+    # def run_query(self, query):
+    #     if not query.resolve_types(self.db):
+    #         self.log("Error: " + query.error_msg)
+    #         return
+    #     self.log("Query return types: " + ", ".join(query.column_types))
+    #     if query.has_geom_columns():
+    #         task = MoveGeomTask("Move: Creating geom view", query,
+    #                             self.project_title, self.db,
+    #                             self.add_geom_layers, self.raise_error)
+    #         self.tm.addTask(task)
+    #     if query.has_temp_columns():
+    #         temp_cols = query.temp_cols()
+    #         for col in temp_cols:
+    #             if query.column_types[col] == 'tgeometry':
+    #                 task = MoveTTask(f"Move: Creating tgeom view {col}", query,
+    #                                  self.project_title, self.db, col,
+    #                                  self.add_tgeom_layer, self.raise_error)
+    #             else:
+    #                 task = MoveTTask(f"Move: Creating tpoint view {col}",
+    #                                  query, self.project_title, self.db, col,
+    #                                  self.add_tpoint_layer, self.raise_error)
+    #             self.tm.addTask(task)
 
     def raise_error(self, msg):
         if msg:
@@ -398,79 +458,80 @@ class Move:
         else:
             self.log("Unknown error")
 
-    def add_geom_layers(self, db, query, params):
-        view_name = params['view_name']
-        col_names = params['col_names']
-        srids = params['srids']
-        geom_types = params['geom_types']
-        for i in range(len(col_names)):
-            col_types = geom_types[i]
-            for col_type in col_types:
-                uri = QgsDataSourceUri()
-                uri.setConnection(db['host'], db['port'], db['database'],
-                                  db['username'], db['password'],
-                                  QgsDataSourceUri.SslDisable)
-                uri.setDataSource("public", view_name, col_names[i], "", "id")
-                uri.setSrid(str(srids[i]))
-                uri.setWkbType(QgsWkbTypes.parseType(col_type))
-                layer_name = col_names[i]
-                layer = self.iface.addVectorLayer(uri.uri(), layer_name,
-                                                  "postgres")
-                if not layer or not layer.isValid():
-                    self.msg("Layer failed to load!")
-                else:
-                    layer.setCustomProperty('move/view_name', view_name)
-                    layer.setCustomProperty('move/sql', query.raw_sql)
+    # def add_geom_layers(self, db, query, params):
+    #     view_name = params['view_name']
+    #     col_names = params['col_names']
+    #     srids = params['srids']
+    #     geom_types = params['geom_types']
+    #     for i in range(len(col_names)):
+    #         col_types = geom_types[i]
+    #         for col_type in col_types:
+    #             uri = QgsDataSourceUri()
+    #             uri.setConnection(db['host'], db['port'], db['database'],
+    #                               db['username'], db['password'],
+    #                               QgsDataSourceUri.SslDisable)
+    #             uri.setDataSource("public", view_name, col_names[i], "", "id")
+    #             uri.setSrid(str(srids[i]))
+    #             uri.setWkbType(QgsWkbTypes.parseType(col_type))
+    #             layer_name = col_names[i]
+    #             layer = self.iface.addVectorLayer(uri.uri(), layer_name,
+    #                                               "postgres")
+    #             if not layer or not layer.isValid():
+    #                 self.msg("Layer failed to load!")
+    #             else:
+    #                 layer.setCustomProperty('move/view_name', view_name)
+    #                 layer.setCustomProperty('move/sql', query.raw_sql)
 
-    def add_tpoint_layer(self, db, query, params):
-        view_name = params['view_name']
-        uri = QgsDataSourceUri()
-        uri.setConnection(db['host'], db['port'], db['database'],
-                          db['username'], db['password'],
-                          QgsDataSourceUri.SslDisable)
-        uri.setDataSource("public", view_name, "geom", "", "id")
-        uri.setSrid(str(params['srid']))
-        uri.setWkbType(QgsWkbTypes.LineStringM)
-        layer_name = query.column_names[params['col_id']]
-        layer = self.iface.addVectorLayer(uri.uri(), layer_name, "postgres")
-        if not layer or not layer.isValid():
-            self.msg("Layer failed to load!")
-        else:
-            layer.setCustomProperty('move/view_name', view_name)
-            layer.setCustomProperty('move/sql', query.raw_sql)
-            layer.temporalProperties().setIsActive(True)
-            pointGeneratorLayer = QgsGeometryGeneratorSymbolLayer.create({
-                'SymbolType':
-                'Marker',
-                'geometryModifier':
-                'line_interpolate_point(\n  $geometry,\n  1.0 * (\n    ( epoch(@map_end_time)/1000 )\n    - m(start_point($geometry))\n  ) / (\n    m(end_point($geometry))\n    - m(start_point($geometry))\n  )\n  * length($geometry)\n) '
-            })
-            layer.renderer().symbol().changeSymbolLayer(0, pointGeneratorLayer)
-            layer.triggerRepaint()
-            self.iface.layerTreeView().refreshLayerSymbology(layer.id())
+    # def add_tpoint_layer(self, db, query, params):
+    #     view_name = params['view_name']
+    #     uri = QgsDataSourceUri()
+    #     uri.setConnection(db['host'], db['port'], db['database'],
+    #                       db['username'], db['password'],
+    #                       QgsDataSourceUri.SslDisable)
+    #     uri.setDataSource("public", view_name, "geom", "", "id")
+    #     uri.setSrid(str(params['srid']))
+    #     uri.setWkbType(QgsWkbTypes.LineStringM)
+    #     layer_name = query.column_names[params['col_id']]
+    #     layer = self.iface.addVectorLayer(uri.uri(), layer_name, "postgres")
+    #     if not layer or not layer.isValid():
+    #         self.msg("Layer failed to load!")
+    #     else:
+    #         layer.setCustomProperty('move/view_name', view_name)
+    #         layer.setCustomProperty('move/sql', query.raw_sql)
+    #         layer.temporalProperties().setIsActive(True)
+    #         pointGeneratorLayer = QgsGeometryGeneratorSymbolLayer.create({
+    #             'SymbolType':
+    #             'Marker',
+    #             'geometryModifier':
+    #             'line_interpolate_point(\n  $geometry,\n  1.0 * (\n    ( epoch(@map_end_time)/1000 )\n    - m(start_point($geometry))\n  ) / (\n    m(end_point($geometry))\n    - m(start_point($geometry))\n  )\n  * length($geometry)\n) '
+    #         })
+    #         layer.renderer().symbol().changeSymbolLayer(0, pointGeneratorLayer)
+    #         layer.triggerRepaint()
+    #         self.iface.layerTreeView().refreshLayerSymbology(layer.id())
 
-    def add_tgeom_layer(self, db, query, params):
-        view_name = params['view_name']
-        uri = QgsDataSourceUri()
-        uri.setConnection(db['host'], db['port'], db['database'],
-                          db['username'], db['password'],
-                          QgsDataSourceUri.SslDisable)
-        uri.setDataSource("public", view_name, "geom")
-        uri.setKeyColumn("id")
-        uri.setSrid(str(params['srid']))
-        uri.setWkbType(QgsWkbTypes.Polygon)
-        layer_name = query.column_names[params['col_id']]
-        layer = self.iface.addVectorLayer(uri.uri(), layer_name, "postgres")
-        if not layer or not layer.isValid():
-            self.log(
-                f"Failed to load layer {layer_name} from view {view_name}")
-        else:
-            layer.setCustomProperty('move/view_name', view_name)
-            layer.setCustomProperty('move/sql', query.raw_sql)
-            layer.temporalProperties().setIsActive(True)
+    # def add_tgeom_layer(self, db, query, params):
+    #     view_name = params['view_name']
+    #     uri = QgsDataSourceUri()
+    #     uri.setConnection(db['host'], db['port'], db['database'],
+    #                       db['username'], db['password'],
+    #                       QgsDataSourceUri.SslDisable)
+    #     uri.setDataSource("public", view_name, "geom")
+    #     uri.setKeyColumn("id")
+    #     uri.setSrid(str(params['srid']))
+    #     uri.setWkbType(QgsWkbTypes.Polygon)
+    #     layer_name = query.column_names[params['col_id']]
+    #     layer = self.iface.addVectorLayer(uri.uri(), layer_name, "postgres")
+    #     if not layer or not layer.isValid():
+    #         self.log(
+    #             f"Failed to load layer {layer_name} from view {view_name}")
+    #     else:
+    #         layer.setCustomProperty('move/view_name', view_name)
+    #         layer.setCustomProperty('move/sql', query.raw_sql)
+    #         layer.temporalProperties().setIsActive(True)
 
     def msg(self, msg):
         self.iface.messageBar().pushMessage(msg, level=Qgis.Info, duration=3)
 
     def log(self, msg):
         QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
+

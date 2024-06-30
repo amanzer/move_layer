@@ -1,14 +1,10 @@
-# Move
+# Move_layer
 
-QGIS Plugin to display MobilityDB query results
+This script is entirely based on the Move plugin built by Maxime Schoemans
 
-This plugin allows users to query [MobilityDB](https://github.com/MobilityDB/MobilityDB) databases using SELECT statements, and display the resulting spatial and spatio-temporal columns as QGIS layers.
+https://github.com/mschoema/move
 
-## Prerequisites
 
- - [QGIS](https://www.qgis.org/en/site/)
- - [MobilityDB](https://github.com/MobilityDB/MobilityDB)
- - [Python](https://www.python.org/)
 
 ## Installation steps
 
@@ -53,35 +49,19 @@ To define the title of the project, go to Project->Properties->General->Project 
 
 ### Execute Query
 
-To use the plugin, simply write a SELECT query in the textbox and press the *Execute Query* button to execute it.  
-The plugin will create layers for each spatial or spatio-temporal column returned by the query.  
 
-Since some queries can be long to execute, all queries are run in the background.  
-Checking if a query is still being run can be done by looking at the running tasks at the bottom of the QGIS window.  
-When the query execution is completed, the plugin will create the appropriate layers in QGIS.  
-This last step might freeze the QGIS window for a moment, but this should only take a few seconds.
-
-**BE CAREFUL: Writing queries that return millions of lines might crash QGIS.**  
-Use a LIMIT at the end of the query to restrict the amount of features created.
 
 
 #### PostGIS geometries
 
-PostGIS geometry columns create up to three layers depending on the geometry types present in the column:
-
- - *MultiPoint* layer if there are *Point* or *MultiPoint* geometries in the column
- - *MultiLineString* layer if there are *LineString* or *MultiLineString* geometries in the column
- - *MultiPolygon* layer if there are *Polygon* or *MultiPolygon* geometries in the column
 
 #### MobilityDB temporal points
 
-MobilityDB *tgeompoint* or *tgeogpoint* columns will result in a QGIS layer each.  
-These layers are marked as temporal, and can be explored using the temporal controller in QGIS. (View->Panels->Temporal Controller Panel)  
-For a fluid animation, set the step to a small interval and the frame rate to 60.
+
 
 ### Refresh Layers
 
-The layers are related to the query that created them, but they are not updated automatically when the initial tables used in the query are updated. Running the *Refresh Layers* button will refresh the layers by re-executing the queries that created them.
+
 
 ## Issues and ideas
 
