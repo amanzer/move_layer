@@ -51,9 +51,9 @@ class MoveLayerController:
         tp.setStartField("start_time")
         tp.setEndField("end_time")
         self.vlayer.updateFields()
-        crs = self.vlayer.crs()
-        crs.createFromId(self.srid)
-        self.vlayer.setCrs(crs)
+        # crs = self.vlayer.crs()
+        # crs.createFromId(self.srid)
+        # self.vlayer.setCrs(crs)
         QgsProject.instance().addMapLayer(self.vlayer) # TODO : replaced method
 
 

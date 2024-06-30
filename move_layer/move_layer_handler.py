@@ -29,7 +29,7 @@ class MoveLayerHandler:
     Logic to handle the time deltas during the animation AND the data stored in memory.
     """
 
-    def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_frame=(0,0)):
+    def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
         self.fps = 100
         self.time_delta_size = time_delta_size
         self.srid = SRID
@@ -40,7 +40,7 @@ class MoveLayerHandler:
         pymeos_initialize()
         
         self.move_layer_controller = MoveLayerController(self.iface, self.srid, self.fps)
-        self.move_layer_controller.temporalController.updateTemporalRange.connect(self.on_new_frame)
+        
         
         self.extent = self.move_layer_controller.get_canvas_extent()
         self.db = DatabaseConnector(self.connection_parameters, self.extent, percentage_of_objects, self.srid)
@@ -49,9 +49,6 @@ class MoveLayerHandler:
 
         self.initiate_temporal_controller_values()
 
-        start_tdelta_key = start_tdelta_frame[0]
-        start_frame = start_tdelta_frame[1]
-        
 
         # variables to keep track of the current state of the animation
         self.current_time_delta_key = start_tdelta_key
@@ -80,8 +77,11 @@ class MoveLayerHandler:
         self.last_recorded_time = time.time()
 
         task_matrix_gen = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps, self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid,  self.create_matrix, self.initiate_animation, self.raise_error)
+                                     self.objects_id_str, self.extent, self.timestamps, self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid,  create_matrix, self.initiate_animation, self.raise_error)
         self.task_manager.addTask(task_matrix_gen)     
+        self.move_layer_controller.temporalController.updateTemporalRange.connect(self.on_new_frame)
+
+
 
     # Getters and Setters
     def get_current_time_delta_key(self):
@@ -186,7 +186,7 @@ class MoveLayerHandler:
             self.last_recorded_time = time.time()
 
             task = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps,self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid, self.create_matrix, self.set_matrix, self.raise_error)
+                                     self.objects_id_str, self.extent, self.timestamps,self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid, create_matrix, self.set_matrix, self.raise_error)
             self.task_manager.addTask(task)        
 
 
@@ -195,7 +195,7 @@ class MoveLayerHandler:
         """
         Handles the logic at each frame change.
         """
-
+        onf_time = time.time()
         frame_number = self.move_layer_controller.get_current_frame_number()
         if self.previous_frame - frame_number <= 0:
             self.direction = 1 # Forward
@@ -216,11 +216,13 @@ class MoveLayerHandler:
                     self.current_time_delta_end = (self.current_time_delta_key + self.time_delta_size) - 1
                     # self.log(f"------- FETCH NEXT BATCH  - forward - delta after : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
                     self.shift_matrices()
-                    self.fetch_next_data(self.current_time_delta_key+self.time_delta_size)                    
-                    
+
                     # Pause the animation if the upcoming batch hasn't been fetched yet
                     if self.task_manager.countActiveTasks() != 0:
                         self.move_layer_controller.pause()
+                    
+                    self.fetch_next_data(self.current_time_delta_key+self.time_delta_size)                    
+                    
                     self.update_vlayer_features()
                     self.changed_key = True
 
@@ -235,13 +237,14 @@ class MoveLayerHandler:
                     
                     self.shift_matrices()
 
-                    self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
                     # Pause the animation if the upcoming batch hasn't been fetched yet
                     if self.task_manager.countActiveTasks() != 0:
                         self.move_layer_controller.pause()
+                    self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
 
                     self.changed_key = True
-                  
+            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
+
         else:
             if self.changed_key:
                 if frame_number < self.current_time_delta_key:
@@ -250,6 +253,8 @@ class MoveLayerHandler:
                     self.changed_key = False
             self.update_vlayer_features()
             self.changed_key = False
+
+            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
         
 
     def update_vlayer_features(self):

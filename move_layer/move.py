@@ -95,7 +95,7 @@ from matplotlib import pyplot as plt
 
 
 
-PERCENTAGE_OF_OBJECTS = 0.01 # To not overload the memory, we only take a percentage of the ships in the database
+PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentage of the ships in the database
 TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
 FPS = 60
 
@@ -368,8 +368,8 @@ class Move:
     def refresh(self):
         self.dockwidget.button_refresh.setEnabled(False)
         if self.move_layer_handler is not None:
-            time_delta_key = self.move_layer_handler.get_current_time_delta_key()
-            start_frame = self.move_layer_handler.get_current_frame()
+            start_time_delta_key = self.move_layer_handler.get_current_time_delta_key()
+            start_frame = self.move_layer_handler.get_last_frame()
             self.move_layer_handler.clean_handler_memory()
             connection_params = {
                 'host': "localhost",
@@ -382,7 +382,7 @@ class Move:
                 'tpoint_column_name': TPOINT_COLUMN_NAME,
             }
             self.log(f"Connection params: {connection_params}")
-            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, (time_delta_key, start_frame))
+            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, GRANULARITY, start_time_delta_key, start_frame)
 
         self.dockwidget.button_refresh.setEnabled(True)
 
@@ -410,7 +410,9 @@ class Move:
             }
             self.log(f"Connection params: {connection_params}")
 
-            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, (0,0))
+            start_time_delta_key = 0
+            start_frame = 0
+            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, GRANULARITY, start_time_delta_key, start_frame)
 
 
 
