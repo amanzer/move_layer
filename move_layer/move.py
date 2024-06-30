@@ -70,6 +70,8 @@ import psycopg2
 import uuid
 
 from .move_dockwidget import MoveDockWidget
+from .move_layer_handler import MoveLayerHandler
+from .move_enum_classes import Time_granularity
 # from .move_query import MoveQuery
 # from .move_task import MoveGeomTask
 # from .move_task import MoveTTask
@@ -80,16 +82,53 @@ from pymeos import *
 from datetime import datetime, timedelta
 import time
 from pympler import asizeof
-from enum import Enum
+
 import numpy as np
 from shapely.geometry import Point
 import math
 import multiprocessing
 import logging
+import os
+import psutil
+from matplotlib import pyplot as plt
 
-from qgis.core import QgsVectorLayerTemporalProperties
 
-MODE_VARIABLE = QgsVectorLayerTemporalProperties.ModeFeatureDateTimeStartAndEndFromFields
+
+
+PERCENTAGE_OF_OBJECTS = 0.01 # To not overload the memory, we only take a percentage of the ships in the database
+TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
+FPS = 60
+
+
+# DATASETS 
+########## AIS Danish maritime dataset ##########
+SRID = 4326
+DATABASE_NAME = "mobilitydb"
+TPOINT_TABLE_NAME = "PyMEOS_demo"
+TPOINT_ID_COLUMN_NAME = "MMSI"
+TPOINT_COLUMN_NAME = "trajectory"
+GRANULARITY = Time_granularity.set_time_step(1).MINUTE
+
+########## AIS Danish maritime dataset ##########
+# SRID = 25832  
+# DATABASE_NAME = "DanishAIS"
+# TPOINT_TABLE_NAME = "ships"
+# TPOINT_ID_COLUMN_NAME = "mmsi"
+# TPOINT_COLUMN_NAME = "trip"
+# GRANULARITY = Time_granularity.set_time_step(1).MINUTE
+
+########## LIMA PERU drivers dataset ##########
+# SRID = 4326
+# DATABASE_NAME = "lima_demo"
+# TPOINT_TABLE_NAME = "driver_paths"
+# TPOINT_ID_COLUMN_NAME = "driver_id"
+# TPOINT_COLUMN_NAME = "trajectory"
+# GRANULARITY = Time_granularity.set_time_step(5).SECOND
+
+
+
+
+    
 
 
 class Move:
@@ -324,20 +363,134 @@ class Move:
         self.current_db = db_name
         # TODO: Maybe display textboxes for username and password
 
-    def get_layer_view_names(self):
-        view_names = []
-        for layer in QgsProject.instance().mapLayers().values():
-            view_name = layer.customProperty('move/view_name')
-            if view_name is not None:
-                view_names.append(view_name)
-        view_name_strings = [f"'{name}'" for name in view_names]
-        view_names_string = ", ".join(view_name_strings)
-        return view_names_string
-
+  
     # Refresh materialized views of existing layers
     def refresh(self):
         self.dockwidget.button_refresh.setEnabled(False)
-        # layer_name = self.iface.activeLayer().customProperty('move/view_name')
+        if self.move_layer_handler is not None:
+            time_delta_key = self.move_layer_handler.get_current_time_delta_key()
+            start_frame = self.move_layer_handler.get_current_frame()
+            self.move_layer_handler.clean_handler_memory()
+            connection_params = {
+                'host': "localhost",
+                'port': 5432,
+                'dbname': DATABASE_NAME,
+                'user': "postgres",
+                'password': "postgres",
+                'table_name': TPOINT_TABLE_NAME,
+                'id_column_name': TPOINT_ID_COLUMN_NAME,
+                'tpoint_column_name': TPOINT_COLUMN_NAME,
+            }
+            self.log(f"Connection params: {connection_params}")
+            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, (time_delta_key, start_frame))
+
+        self.dockwidget.button_refresh.setEnabled(True)
+
+
+
+    def set_execute_enabled(self, enabled=True):
+        self.dockwidget.button_execute.setEnabled(enabled)
+        self.dockwidget.input_text.setReadOnly(not enabled)
+
+    # Execute current query
+    def execute(self):
+        if not self.ran_once:
+            self.set_execute_enabled(False)
+            # raw_sql = self.dockwidget.input_text.toPlainText()
+
+            connection_params = {
+                'host': "localhost",
+                'port': 5432,
+                'dbname': DATABASE_NAME,
+                'user': "postgres",
+                'password': "postgres",
+                'table_name': TPOINT_TABLE_NAME,
+                'id_column_name': TPOINT_ID_COLUMN_NAME,
+                'tpoint_column_name': TPOINT_COLUMN_NAME,
+            }
+            self.log(f"Connection params: {connection_params}")
+
+            self.move_layer_handler = MoveLayerHandler(self.iface, connection_params, self.tm, TIME_DELTA_SIZE, PERCENTAGE_OF_OBJECTS,SRID, (0,0))
+
+
+
+            self.ran_once = True
+            self.set_execute_enabled(True)
+
+
+    def raise_error(self, msg):
+        if msg:
+            self.log("Error: " + msg)
+        else:
+            self.log("Unknown error")
+
+    def msg(self, msg):
+        self.iface.messageBar().pushMessage(msg, level=Qgis.Info, duration=3)
+
+    def log(self, msg):
+        QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  # def get_layer_view_names(self):
+    #     view_names = []
+    #     for layer in QgsProject.instance().mapLayers().values():
+    #         view_name = layer.customProperty('move/view_name')
+    #         if view_name is not None:
+    #             view_names.append(view_name)
+    #     view_name_strings = [f"'{name}'" for name in view_names]
+    #     view_names_string = ", ".join(view_name_strings)
+    #     return view_names_string
+
+ # layer_name = self.iface.activeLayer().customProperty('move/view_name')
         # select_sql = f"refresh materialized view {layer_name};"
 
         # def run(task):
@@ -361,12 +514,8 @@ class Move:
         #         'Move: Refresh Active Layer', run, on_finished=completed)
         #     self.tm.addTask(task)
         # else:
-        self.dockwidget.button_refresh.setEnabled(True)
 
-    # Drop unused materialized views
-    def clean(self):
-        pass
-        # select_sql = f"""
+                # select_sql = f"""
         #     select 'drop materialized view ' || relname || ';'
         #     from pg_class
         #     where relkind = 'm'
@@ -392,43 +541,6 @@ class Move:
         #             conn.commit()
         # except psycopg2.Error as e:
         #     pass
-
-    def set_execute_enabled(self, enabled=True):
-        self.dockwidget.button_execute.setEnabled(enabled)
-        self.dockwidget.input_text.setReadOnly(not enabled)
-
-    # Execute current query
-    def execute(self):
-        # self.clean()
-        if not self.ran_once:
-            self.set_execute_enabled(False)
-            raw_sql = self.dockwidget.input_text.toPlainText()
-            
-            table, id_col, tpoint_col = raw_sql.split("|")
-
-            self.log(f"ID Column: {id_col}")
-            self.log(f"TPoint Column: {tpoint_col}")
-            self.log(f"db params : {self.db_params}")
-            connection_params = {
-                'host': self.db['host'],
-                'port': self.db['port'],
-                'dbname': self.db['database'],
-                'user': self.db['username'],
-                'password': self.db['password']
-            }
-            self.log(f"Connection params: {connection_params}")
-            # if raw_sql:
-            #     query = MoveQuery(raw_sql)
-            #     if not query.is_valid:
-            #         self.log(f"Invalid Query: {query}")
-            #     else:
-            #         self.log(f"Running Query: {query}")
-            #         self.log(f"Query informations : {str(query)}")
-            #         # self.run_query(query)
-
-            self.ran_once = True
-            self.set_execute_enabled(True)
-
     # def run_query(self, query):
     #     if not query.resolve_types(self.db):
     #         self.log("Error: " + query.error_msg)
@@ -452,11 +564,7 @@ class Move:
     #                                  self.add_tpoint_layer, self.raise_error)
     #             self.tm.addTask(task)
 
-    def raise_error(self, msg):
-        if msg:
-            self.log("Error: " + msg)
-        else:
-            self.log("Unknown error")
+    
 
     # def add_geom_layers(self, db, query, params):
     #     view_name = params['view_name']
@@ -529,9 +637,5 @@ class Move:
     #         layer.setCustomProperty('move/sql', query.raw_sql)
     #         layer.temporalProperties().setIsActive(True)
 
-    def msg(self, msg):
-        self.iface.messageBar().pushMessage(msg, level=Qgis.Info, duration=3)
 
-    def log(self, msg):
-        QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
 

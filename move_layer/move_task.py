@@ -3,6 +3,110 @@ import psycopg2
 from qgis.core import QgsTask
 
 
+import multiprocessing
+import os
+import psutil
+from qgis.core import QgsMessageLog
+from qgis.core import Qgis
+
+
+
+class Matrix_generation_thread(QgsTask):
+    """
+    This thread creates next time delta's the matrix containing the positions for all objects to show. 
+    """
+    def __init__(self, description,project_title, beg_frame, end_frame, objects_id_str, extent, timestamps, time_delta_size, connection_params, granularity_enum, srid, create_matrix_fnc, finished_fnc, failed_fnc):
+        super(Matrix_generation_thread, self).__init__(description, QgsTask.CanCancel)
+
+        self.project_title = project_title
+
+        self.begin_frame = beg_frame
+        self.end_frame = end_frame
+        self.objects_id_str = objects_id_str
+        self.extent = extent
+        self.timestamps = timestamps
+        self.time_delta_size = time_delta_size
+        self.connection_params = connection_params
+        self.granularity_enum = granularity_enum
+        self.srid = srid
+        self.create_matrix = create_matrix_fnc
+        self.finished_fnc = finished_fnc
+        self.failed_fnc = failed_fnc
+        pid = os.getpid()
+        self.log(f"QgisThread init pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}")
+            
+    
+        self.result_params = None
+        self.error_msg = None
+
+
+    def finished(self, result):
+        if result:
+            self.finished_fnc(self.result_params)
+        else:
+            self.failed_fnc(self.error_msg)
+
+
+    def run(self):
+        """
+        Runs the new process to create the matrix for the given time delta.
+        """
+        try:
+            pid = os.getpid()
+            self.log(f"QgisThread run pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}")
+
+            # connection_params= {
+            #     "host": "localhost",
+            #     "port": 5432,
+            #     "dbname": DATABASE_NAME,
+            #     "user": "postgres",
+            #     "password": "postgres"
+            # }
+
+           
+            result_queue = multiprocessing.Queue()
+            
+            # self.log(f"arguments : begin_frame : {self.begin_frame}, end_frame : {self.end_frame}, TIME_DELTA_SIZE : {TIME_DELTA_SIZE}, PERCENTAGE_OF_OBJECTS : {PERCENTAGE_OF_OBJECTS}, {self.extent}, len timestamps :{len(self.timestamps)}, granularity : {GRANULARITY.value},{len(self.objects_id_str)}")
+            process = multiprocessing.Process(target=self.create_matrix, args=(result_queue, self.begin_frame, self.end_frame, self.time_delta_size, self.extent, self.timestamps, self.connection_params,  self.granularity_enum, self.srid, self.objects_id_str))
+            process.start()
+            # self.log(f"Process started")
+           
+            return_value = result_queue.get()
+            if return_value == 1:
+                error = result_queue.get()
+                self.log(f"Error inside new process: {error}")
+                self.result_params = {
+                    'matrix' : result_matrix
+                }
+                return True
+            else:
+                # Retrieve the result from the queue
+                result_matrix = result_queue.get()
+                logs= result_queue.get()
+                result_queue.close()
+                process.join()  # Wait for the process to complete
+                self.log(logs)
+                # self.log(f"Retrieved matrix shape: {result_matrix.shape}, logs {logs}" )
+
+                self.result_params = {
+                    'matrix' : result_matrix
+                }
+        except Exception as e:
+            self.log(f"Error in run method : {e}")
+            self.error_msg = str(e)
+            return False
+        return True
+    
+
+    def log(self, msg):
+        """
+        Function to log messages in the QGIS log window.
+        """
+        QgsMessageLog.logMessage(msg, 'qViz', level=Qgis.Info)
+
+
+
+
 
 # class MoveTask(QgsTask):
 #     def __init__(self, description, query, project_title, db, finished_fnc,
