@@ -134,7 +134,7 @@ class MoveLayerController:
         fps = min(optimal_fps, self.fps)
 
         self.temporalController.setFramesPerSecond(fps)
-        self.log(f"{fps} : FPS {optimal_fps}")
+        self.log(f"FPS : {fps}      |      ONF : {optimal_fps}      |      Matrix {self.fps}")
         self.fps_record.append(optimal_fps)
 
 
@@ -146,7 +146,7 @@ class MoveLayerController:
         """
         Function to log messages in the QGIS log window.
         """
-        QgsMessageLog.logMessage(msg, 'QVIZ', level=Qgis.Info)
+        QgsMessageLog.logMessage(msg, f'Framerate', level=Qgis.Info)
 
     # def delete_vlayer(self):
     #     start_tdelta_key = self.handler.get_current_time_delta_key()

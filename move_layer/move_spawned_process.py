@@ -17,7 +17,7 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
     try:
         logs=""
         pid = os.getpid()
-        logs += (f"New process pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}") 
+        logs += (f"pid : {pid} create_matrix |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
         p_start = timestamps[begin_frame]
         p_end = timestamps[end_frame]
         start_date = timestamps[0]
@@ -124,17 +124,19 @@ def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_
     try:
         logs=""
 
-        
-
-        pid = os.getpid()
-        logs += (f"New process pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}") 
-        empty_point_wkt = Point().wkt  # "POINT EMPTY"
-      
-
         # cpus = [[x, x+1] for x in range(2, 12, 2)]
         cpu_count = psutil.cpu_count()
         half_cpu_count = cpu_count // 2
         cpus = [i for i in range(half_cpu_count, cpu_count)]
+
+        pid = os.getpid()
+        psutil.Process(pid).cpu_affinity(cpus) # Assign the process to the last 4 cores
+
+        logs += (f"pid : {pid} create_matrix |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
+        empty_point_wkt = Point().wkt  # "POINT EMPTY"
+      
+
+        
 
         num_workers = len(cpus)-1
         # logs += f"Number of workers : {num_workers}\n"

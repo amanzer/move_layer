@@ -85,12 +85,16 @@ def worker_fnc(args):
 
         for i in range(len(rows)):
             if rows[i][2] is not None:
-                traj_resampled = rows[i][2]
+                try:
+                    traj_resampled = rows[i][2]
 
-                start_index = rows[i][0] - begin_frame
-                end_index = rows[i][1] - begin_frame
-                values = np.array([point.wkt for point in traj_resampled.values()])
-                chunk_matrix[i, start_index:end_index+1] = values
+                    start_index = rows[i][0] - begin_frame
+                    end_index = rows[i][1] - begin_frame
+                    values = np.array([point.wkt for point in traj_resampled.values()])
+                    chunk_matrix[i, start_index:end_index+1] = values
+                except:
+                    raise ValueError(f"Error in asignation : {start_index} - {end_index} | begin_frame : {begin_frame} | end_frame : {end_frame} | pstart {p_start} | pend {p_end} | start_date {start_date} | {len(rows[i][2].values())} \n {query}")
+                
             
 
         return 0, chunk_matrix, logs

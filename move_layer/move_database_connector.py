@@ -59,6 +59,10 @@ class DatabaseConnector:
             self.log(f"Error in DatabaseConnector init : {e}")
 
 
+    def get_total_ids(self):
+        return self.ids_list
+    
+
     def get_objects_str(self):
         return self.objects_id_str
 

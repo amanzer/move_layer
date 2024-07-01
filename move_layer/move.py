@@ -91,7 +91,7 @@ import logging
 import os
 import psutil
 from matplotlib import pyplot as plt
-
+import gc
 
 
 
@@ -371,6 +371,9 @@ class Move:
             start_time_delta_key = self.move_layer_handler.get_current_time_delta_key()
             start_frame = self.move_layer_handler.get_last_frame()
             self.move_layer_handler.clean_handler_memory()
+            del self.move_layer_handler
+            gc.collect()
+            
             connection_params = {
                 'host': "localhost",
                 'port': 5432,
@@ -394,8 +397,9 @@ class Move:
 
     # Execute current query
     def execute(self):
+        self.set_execute_enabled(False)
         if not self.ran_once:
-            self.set_execute_enabled(False)
+            
             # raw_sql = self.dockwidget.input_text.toPlainText()
 
             connection_params = {
@@ -418,7 +422,12 @@ class Move:
 
             self.ran_once = True
             self.set_execute_enabled(True)
-
+        else:
+            self.move_layer_handler.clean_handler_memory()
+            del self.move_layer_handler
+            gc.collect()
+            self.ran_once = False
+            self.set_execute_enabled(True)
 
     def raise_error(self, msg):
         if msg:

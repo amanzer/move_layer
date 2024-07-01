@@ -33,7 +33,7 @@ class Matrix_generation_thread(QgsTask):
         self.finished_fnc = finished_fnc
         self.failed_fnc = failed_fnc
         pid = os.getpid()
-        self.log(f"QgisThread init pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}")
+        self.log(f"pid : {pid} QgisThread init |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
             
     
         self.result_params = None
@@ -53,16 +53,8 @@ class Matrix_generation_thread(QgsTask):
         """
         try:
             pid = os.getpid()
-            self.log(f"QgisThread run pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}")
-
-            # connection_params= {
-            #     "host": "localhost",
-            #     "port": 5432,
-            #     "dbname": DATABASE_NAME,
-            #     "user": "postgres",
-            #     "password": "postgres"
-            # }
-
+            self.log(f"pid : {pid} QgisThread run |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
+            
            
             result_queue = multiprocessing.Queue()
             
@@ -103,6 +95,9 @@ class Matrix_generation_thread(QgsTask):
         Function to log messages in the QGIS log window.
         """
         QgsMessageLog.logMessage(msg, 'qViz', level=Qgis.Info)
+
+
+
 
 
 

@@ -30,6 +30,8 @@ class MoveLayerHandler:
     """
 
     def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
+        clear_log = "\n"*10
+        self.log(clear_log)
         self.multicores = False
 
         self.fps = 100
@@ -65,14 +67,19 @@ class MoveLayerHandler:
         self.next_matrix = None
 
         self.objects_count = self.db.get_objects_count()
-
+        self.pid = os.getpid()
         if self.multicores: # Keep all the ids in memory
             self.objects_id_str = self.db.get_total_ids()
-            self.current_matrix = create_matrix_multi_cores
-            
+            self.create_matrix = create_matrix_multi_cores
+            cpu_count = psutil.cpu_count()
+            half_cpu_count = cpu_count // 2
+            cpus = [i for i in range(half_cpu_count)]
+            psutil.Process(self.pid).cpu_affinity(cpus) # Assign the process to the last 4 cores
+
         else: # Directly get the ids in a formatted string since single core
             self.objects_id_str = self.db.get_objects_str()
-            self.current_matrix = create_matrix
+            self.create_matrix = create_matrix
+
         
 
         # Create qgis features for all objects to display
@@ -183,9 +190,8 @@ class MoveLayerHandler:
         """
         Creates a thread to fetch the data from the MobilityDB database for the given time delta.
         """
-        pid = os.getpid()
-        self.log(f"Qgis process pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}")
         
+        self.log(f"pid : {self.pid} Qgis main process |  CPU affinity : {psutil.Process(self.pid).cpu_affinity()} \n") 
         
         beg_frame = time_delta_key
         end_frame = (time_delta_key + self.time_delta_size) -1
@@ -311,6 +317,7 @@ class MoveLayerHandler:
         uninterrupted_animation = self.time_delta_size / matrix_generation_time
         new_fps = min(uninterrupted_animation, self.fps)
         self.move_layer_controller.set_fps(new_fps)
+        self.log(f"Matrix time (start to end of QgisThread + new processes) : {matrix_generation_time} s | FPS for Uninterrupted animation : {uninterrupted_animation}")
 
 
     def set_matrix(self, params):
