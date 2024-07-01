@@ -2,7 +2,7 @@
 Method to be run by a spawned process to create a matrix of trajectories from a MobilityDB database.
 """
 
-
+from .move_worker_process import worker_fnc
 from pymeos.db.psycopg import MobilityDB
 from pymeos import *
 import psutil
@@ -10,6 +10,8 @@ import os
 import numpy as np
 import time 
 from shapely.geometry import Point
+import multiprocessing
+
 
 def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent, timestamps, connection_parameters, granularity_enum, srid, ids_str):
     try:
@@ -113,3 +115,73 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
         result_queue.put(e)
         result_queue.put(logs)
         return False
+    
+
+
+
+
+def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_size, extent, timestamps, connection_parameters, granularity_enum, srid, total_ids):
+    try:
+        logs=""
+
+        
+
+        pid = os.getpid()
+        logs += (f"New process pid : {pid} | affinity : {psutil.Process(pid).cpu_affinity()}") 
+        empty_point_wkt = Point().wkt  # "POINT EMPTY"
+      
+
+        # cpus = [[x, x+1] for x in range(2, 12, 2)]
+        cpu_count = psutil.cpu_count()
+        half_cpu_count = cpu_count // 2
+        cpus = [i for i in range(half_cpu_count, cpu_count)]
+
+        num_workers = len(cpus)-1
+        # logs += f"Number of workers : {num_workers}\n"
+        ids_per_process = int(np.ceil(len(total_ids)) / num_workers)
+        
+       
+
+        # Distributing the ids to the workers
+        ids_sub_list = [total_ids[i:i+ids_per_process] for i in range(0, len(total_ids), ids_per_process)] 
+
+
+        pool = multiprocessing.Pool(num_workers)
+
+        
+        logs += f"{cpus[0]}"
+        worker_args = [(ids_sub_list[i], begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, extent, srid, timestamps, cpus[i]) for i in range(len(ids_sub_list))]
+        
+        
+        # pool.map(process_chunk2, worker_args)
+        results = pool.map(worker_fnc, worker_args)
+        
+        matrix = np.full((len(total_ids), time_delta_size), empty_point_wkt, dtype=object)
+
+        # check if one of results first argument is 1, if so, raise an error
+        for i, (status, chunk_matrix, worker_logs) in enumerate(results):
+            if status == 1:
+                raise ValueError(worker_logs)
+
+            start_idx = i * ids_per_process
+            end_idx = start_idx + len(chunk_matrix)
+            matrix[start_idx:end_idx, :] = chunk_matrix
+            logs += worker_logs
+
+
+        result_queue.put(0)
+        result_queue.put(matrix)
+        result_queue.put(logs)
+        return True
+
+    except Exception as e:
+        result_queue.put(1)
+        result_queue.put(e)
+        result_queue.put(logs)
+        return False
+
+    finally:
+        pool.close()
+        pool.join()
+
+        

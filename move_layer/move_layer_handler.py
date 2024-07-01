@@ -3,7 +3,7 @@
 from .move_layer_controller import MoveLayerController
 from .move_database_connector import DatabaseConnector
 from .move_task import Matrix_generation_thread
-from .move_spawned_process import create_matrix
+from .move_spawned_process import create_matrix, create_matrix_multi_cores
 
 from pymeos.db.psycopg import MobilityDB
 from pymeos import *
@@ -30,6 +30,8 @@ class MoveLayerHandler:
     """
 
     def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
+        self.multicores = False
+
         self.fps = 100
         self.time_delta_size = time_delta_size
         self.srid = SRID
@@ -63,8 +65,14 @@ class MoveLayerHandler:
         self.next_matrix = None
 
         self.objects_count = self.db.get_objects_count()
-        self.objects_id_str = self.db.get_objects_str()
-   
+
+        if self.multicores: # Keep all the ids in memory
+            self.objects_id_str = self.db.get_total_ids()
+            self.current_matrix = create_matrix_multi_cores
+            
+        else: # Directly get the ids in a formatted string since single core
+            self.objects_id_str = self.db.get_objects_str()
+            self.current_matrix = create_matrix
         
 
         # Create qgis features for all objects to display
@@ -77,7 +85,7 @@ class MoveLayerHandler:
         self.last_recorded_time = time.time()
 
         task_matrix_gen = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps, self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid,  create_matrix, self.initiate_animation, self.raise_error)
+                                     self.objects_id_str, self.extent, self.timestamps, self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid,  self.create_matrix, self.initiate_animation, self.raise_error)
         self.task_manager.addTask(task_matrix_gen)     
         self.move_layer_controller.temporalController.updateTemporalRange.connect(self.on_new_frame)
 
@@ -186,7 +194,7 @@ class MoveLayerHandler:
             self.last_recorded_time = time.time()
 
             task = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps,self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid, create_matrix, self.set_matrix, self.raise_error)
+                                     self.objects_id_str, self.extent, self.timestamps,self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid, self.create_matrix, self.set_matrix, self.raise_error)
             self.task_manager.addTask(task)        
 
 
