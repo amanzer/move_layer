@@ -87,6 +87,7 @@ class MoveLayerHandler:
     def update_geometries(self):
         """
         Updates the geometries of the features in the vector layer.
+        # TODO : refresh current time delta here since load time is very short.
         """
         frame_number = self.previous_frame
         timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
@@ -117,7 +118,7 @@ class MoveLayerHandler:
     def set_nobjects(self, n_objects):
         if n_objects != self.n_objects:
             self.n_objects = n_objects
-
+            self.move_layer_controller.pause_animation()
             self.update_geometries()
         
         

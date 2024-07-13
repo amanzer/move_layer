@@ -82,7 +82,7 @@ from .move_database_connector import Database_connector
 
 
 PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentage of the ships in the database
-TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
+TIME_DELTA_SIZE = 30  # Number of frames associated to one Time delta
 FPS = 60
 
 
@@ -345,6 +345,7 @@ class Move:
             self.dockwidget.combo_fps.addItem(str(f))
             # self.move_handler.update_fps(f)
             self.set_execute_enabled(True)
+        self.dockwidget.combo_fps.setCurrentIndex(fps.index(60))
 
     def onFpsChanged(self, fps):
         self.log(f"FPS changed to {fps}")
