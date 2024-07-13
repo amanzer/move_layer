@@ -5,6 +5,7 @@ from qgis.core import (
 )
 from qgis.PyQt.QtCore import QVariant
 
+
 from qgis.core import QgsVectorLayerTemporalProperties
 from qgis.core import QgsMessageLog
 from qgis.core import Qgis
@@ -23,57 +24,57 @@ class MoveLayerController:
         self.iface = iface    
         self.canvas = self.iface.mapCanvas()
         self.create_vlayer()
-        
+
+        self.canvas.setDestinationCrs(QgsCoordinateReferenceSystem(f"EPSG:{self.srid}"))
         self.temporalController = self.canvas.temporalController()
         self.temporalController.setCurrentFrameNumber(0)
         self.extent = self.canvas.extent().toRectF().getCoords()
 
-        self.fps = FPS
-
-        self.fps_record = []
+        self.fps_cap = FPS
         
+        self.fps_record = []
+        self.onf_record = []
+
+
  
+
+    def add_features(self, features_list):
+        if self.vlayer:
+            self.vlayer.dataProvider().addFeatures(features_list)
+            
 
     def create_vlayer(self):
         """
         Creates a Qgis Vector layer in memory to store the points to be displayed on the map.
         """
-        self.canvas.setDestinationCrs(QgsCoordinateReferenceSystem(f"EPSG:{self.srid}")) # TODO : not needed
-
         self.vlayer = QgsVectorLayer("Point", "MobilityBD Data", "memory")
         pr = self.vlayer.dataProvider()
-        pr.addAttributes([QgsField("start_time", QVariant.DateTime), QgsField("end_time", QVariant.DateTime)])
+        pr.addAttributes([QgsField("id", QVariant.Int) ,QgsField("start_time", QVariant.DateTime), QgsField("end_time", QVariant.DateTime)])
         self.vlayer.updateFields()
         tp = self.vlayer.temporalProperties()
         tp.setIsActive(True)
+        # tp.setMode(qgis.core.QgsVectorLayerTemporalProperties.ModeFeatureDateTimeInstantFromField)
         tp.setMode(QgsVectorLayerTemporalProperties.ModeFeatureDateTimeStartAndEndFromFields)
-       
+        # tp.setStartField("time")
         tp.setStartField("start_time")
         tp.setEndField("end_time")
         self.vlayer.updateFields()
-        # crs = self.vlayer.crs()
-        # crs.createFromId(self.srid)
-        # self.vlayer.setCrs(crs)
-        QgsProject.instance().addMapLayer(self.vlayer) # TODO : replaced method
+
+        QgsProject.instance().addMapLayer(self.vlayer)
 
 
     # Getters
 
-    def get_canvas_extent(self):
+    def get_current_canvas_extent(self):
+        return self.canvas.extent().toRectF().getCoords()
+
+    def get_initial_canvas_extent(self):
         return self.extent
     
-
-    def get_current_frame_number(self):
-
-        return self.temporalController.currentFrameNumber()
-
-    def get_average_fps(self):
-        """
-        Returns the average FPS of the temporal controller.
-        """
-
-        return sum(self.fps_record)/len(self.fps_record)
-
+    def get_vlayer_fields(self):
+        if self.vlayer:
+            return self.vlayer.fields()
+        return None
 
     # Setters 
 
@@ -101,8 +102,8 @@ class MoveLayerController:
         if self.vlayer:
             self.vlayer.dataProvider().addFeatures(features_list)
 
-    def set_fps(self, fps):
-        self.fps = fps
+    def set_fps_cap(self, fps):
+        self.fps_cap = fps
 
     # Methods to handle the temporal controller
     
@@ -115,13 +116,17 @@ class MoveLayerController:
         else:
             self.temporalController.playBackward()
 
+    def update_fps_cap(self, new_fps_cap):
+        """
+        Updates the frame rate cap of the temporal controller.
+        """
+        self.fps_cap = new_fps_cap
 
-    def pause(self):
+    def pause_animation(self):
         """
         Pauses the temporal controller animation.
         """
         self.temporalController.pause()
-
 
     def update_frame_rate(self, new_frame_time):
         """
@@ -131,32 +136,14 @@ class MoveLayerController:
         # Calculating the optimal FPS based on the new frame time
         optimal_fps = 1 / new_frame_time
         # Ensure FPS does not exceed 60
-        fps = min(optimal_fps, self.fps)
+        fps = min(optimal_fps, self.fps_cap)
 
         self.temporalController.setFramesPerSecond(fps)
-        self.log(f"FPS : {fps}      |      ONF : {optimal_fps}      |      Matrix {self.fps}")
+        self.log(f"FPS : {fps}      |      ONF : {optimal_fps}      |   fps cap {self.fps_cap}")
         self.fps_record.append(optimal_fps)
-
-
     
-    def delete_vlayer(self):
-        QgsProject.instance().removeMapLayer(self.vlayer.id())
-   
-    def log(self, msg):
-        """
-        Function to log messages in the QGIS log window.
-        """
-        QgsMessageLog.logMessage(msg, f'Framerate', level=Qgis.Info)
+    def log (self, message):
+        QgsMessageLog.logMessage(message, level=Qgis.Info)
+    
 
-    # def delete_vlayer(self):
-    #     start_tdelta_key = self.handler.get_current_time_delta_key()
-    #     start_frame = self.handler.get_last_frame()
 
-    #     self.handler.delete()
-        
-    #     self.create_vlayer()
-    #     self.set_temporal_controller_frame_number(start_frame)
-    #     self.extent = self.canvas.extent().toRectF().getCoords()
-
-    #     self.handler = Time_deltas_handler(self, (start_tdelta_key ,start_frame))
-    #     self.fps_record = []

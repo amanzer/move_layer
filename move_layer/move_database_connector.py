@@ -4,12 +4,14 @@ from pymeos.db.psycopg import MobilityDB
 from qgis.core import QgsMessageLog
 from qgis.core import Qgis
 
-class DatabaseConnector:
+
+
+class Database_connector:
     """
     Singleton class used to connect to the MobilityDB database.
     """
     
-    def __init__(self, connection_parameters, extent, percentage_of_objects, srid):
+    def __init__(self, connection_parameters):
         try: 
             connection_params = {
             "host": connection_parameters["host"],
@@ -18,53 +20,29 @@ class DatabaseConnector:
             "user": connection_parameters["user"],
             "password": connection_parameters["password"],
             }
-            self.percentage_of_objects = percentage_of_objects
-            self.srid = srid
+   
+
             self.table_name = connection_parameters["table_name"]
             self.id_column_name = connection_parameters["id_column_name"]
             self.tpoint_column_name = connection_parameters["tpoint_column_name"]     
             self.connection = MobilityDB.connect(**connection_params)
-            x_min,y_min, x_max, y_max = extent
+     
             self.cursor = self.connection.cursor()
             query = f"""
-                                WITH trajectories as (
-                                    SELECT 
-                                        atStbox(
-                                            a.{self.tpoint_column_name}::tgeompoint,
-                                            stbox(
-                                                ST_MakeEnvelope(
-                                                    {x_min}, {y_min}, -- xmin, ymin
-                                                    {x_max}, {y_max}, -- xmax, ymax
-                                                    {self.srid} -- SRID
-                                                )
-                                            )
-                                        ) as trajectory, a.{self.id_column_name} as id
-                                    FROM public.{self.table_name} as a )
-
-                                    SELECT tr.id                            
-                                    FROM trajectories as tr where tr.trajectory is not null ;
-                                """
+                    SELECT {self.id_column_name} FROM public.{self.table_name} ;
+                    """
             
             self.cursor.execute(query)
-    
+                                
             self.ids_list = self.cursor.fetchall()
-            self.ids_list = self.ids_list[:int(len(self.ids_list)*self.percentage_of_objects)]
+            # self.ids_list = self.ids_list[:int(len(self.ids_list)*PERCENTAGE_OF_OBJECTS)]
             self.objects_count = len(self.ids_list)
 
-            ids_list = [ f"'{id[0]}'"  for id in self.ids_list]
-            self.objects_id_str = ', '.join(map(str, ids_list))
-
-
         except Exception as e:
-            self.log(f"Error in DatabaseConnector init : {e}")
+            self.log(e)
 
-
-    def get_total_ids(self):
+    def get_objects_ids(self):
         return self.ids_list
-    
-
-    def get_objects_str(self):
-        return self.objects_id_str
 
 
     def get_objects_count(self):
@@ -79,10 +57,10 @@ class DatabaseConnector:
         try:
             query = f"SELECT MIN(startTimestamp({self.tpoint_column_name})) AS earliest_timestamp FROM public.{self.table_name};"
             self.cursor.execute(query)
-            # self.log(query)
+            # log(query)
             return self.cursor.fetchone()[0]
         except Exception as e:
-            self.log(f"Error in get_min_timestamp : {e}")
+            self.log(e)
 
 
     def get_max_timestamp(self):
@@ -94,7 +72,41 @@ class DatabaseConnector:
             self.cursor.execute(f"SELECT MAX(endTimestamp({self.tpoint_column_name})) AS latest_timestamp FROM public.{self.table_name};")
             return self.cursor.fetchone()[0]
         except Exception as e:
-            self.log(f"Error in get_max_timestamp : {e}")
+            self.log(e)
+
+
+    def get_tgeompoints(self, p_start, p_end, extent, srid, n_objects):
+
+        x_min,y_min, x_max, y_max = extent
+        ids = self.ids_list[:n_objects]
+        ids_list = [ f"'{id[0]}'"  for id in ids]
+        objects_id_str = ', '.join(map(str, ids_list))
+        # Part 1 : Fetch Tpoints from MobilityDB database
+      
+
+        query = f"""WITH trajectories as (
+                SELECT 
+                    atStbox(
+                        a.{self.tpoint_column_name}::tgeompoint,
+                        stbox(
+                            ST_MakeEnvelope(
+                                {x_min}, {y_min}, -- xmin, ymin
+                                {x_max}, {y_max}, -- xmax, ymax
+                                {srid} -- SRID
+                            ),
+                            tstzspan('[{p_start}, {p_end}]')
+                        )
+                    ) as trajectory
+                FROM public.{self.table_name} as a 
+                WHERE a.{self.id_column_name} in ({objects_id_str}))
+            
+                SELECT
+                        rs.trajectory
+                FROM trajectories as rs ;"""
+
+        self.cursor.execute(query)
+        self.log(f"query : {query}\n")
+        return self.cursor.fetchall()
 
 
     def close(self):
@@ -105,5 +117,5 @@ class DatabaseConnector:
         self.connection.close()
 
     def log(self, msg):
-        QgsMessageLog.logMessage(msg, 'qViz', level=Qgis.Info)
-    
+        QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
+

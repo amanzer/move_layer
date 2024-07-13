@@ -1,9 +1,8 @@
 
 
 from .move_layer_controller import MoveLayerController
-from .move_database_connector import DatabaseConnector
-from .move_task import Matrix_generation_thread
-from .move_spawned_process import create_matrix, create_matrix_multi_cores
+from .move_task import Next_Time_Delta_thread
+# from .move_spawned_process import create_matrix, create_matrix_multi_cores
 
 from pymeos.db.psycopg import MobilityDB
 from pymeos import *
@@ -23,37 +22,37 @@ import time
 import psutil
 import os 
 
-
 class MoveLayerHandler:
     """
     Logic to handle the time deltas during the animation AND the data stored in memory.
     """
 
-    def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
+    def __init__(self, iface, db, tm, time_delta_size, n_objects, SRID, granularity_enum, fps, start_tdelta_key, start_frame):
         clear_log = "\n"*10
         self.log(clear_log)
-        self.multicores = False
 
-        self.fps = 100
-        self.time_delta_size = time_delta_size
-        self.srid = SRID
-        self.granularity_enum = granularity_enum
-        self.connection_parameters = connection_parameters
         self.task_manager = tm
+        # self.connection_parameters = connection_parameters
+        self.db = db
+        self.fps = fps
         self.iface = iface
+        self.time_delta_size = time_delta_size
+        self.n_objects = n_objects
+        self.SRID = SRID
+        self.granularity_enum = granularity_enum
+        self.start_tdelta_key = start_tdelta_key
+        self.start_frame = start_frame
         pymeos_initialize()
         
-        self.move_layer_controller = MoveLayerController(self.iface, self.srid, self.fps)
+        self.move_layer_controller = MoveLayerController(self.iface, self.SRID, self.fps)
         
-        
-        self.extent = self.move_layer_controller.get_canvas_extent()
-        self.db = DatabaseConnector(self.connection_parameters, self.extent, percentage_of_objects, self.srid)
-        self.generate_timestamps()
-
+        self.extent = self.move_layer_controller.get_initial_canvas_extent()
+        self.start_date = self.db.get_min_timestamp()
+        self.end_date = self.db.get_max_timestamp()
 
         self.initiate_temporal_controller_values()
 
-
+  
         # variables to keep track of the current state of the animation
         self.current_time_delta_key = start_tdelta_key
         self.current_time_delta_end = start_tdelta_key + self.time_delta_size - 1
@@ -61,66 +60,99 @@ class MoveLayerHandler:
         self.direction = 1 # 1 : forward, 0 : backward
         self.changed_key = False # variable used to handle the scenario where a user moves forward and backward on a time delta boundary tick
         
-        # Matrix variables
-        self.previous_matrix = None
-        self.current_matrix = None
-        self.next_matrix = None
-
         self.objects_count = self.db.get_objects_count()
-        self.pid = os.getpid()
-        if self.multicores: # Keep all the ids in memory
-            self.objects_id_str = self.db.get_total_ids()
-            self.create_matrix = create_matrix_multi_cores
-            cpu_count = psutil.cpu_count()
-            half_cpu_count = cpu_count // 2
-            cpus = [i for i in range(half_cpu_count)]
-            psutil.Process(self.pid).cpu_affinity(cpus) # Assign the process to the last 4 cores
-
-        else: # Directly get the ids in a formatted string since single core
-            self.objects_id_str = self.db.get_objects_str()
-            self.create_matrix = create_matrix
-
         
+        self.previous_tpoints = None
+        self.current_tpoints = None
+        self.next_tpoints = None
 
-        # Create qgis features for all objects to display
-        self.generate_qgis_features(self.objects_count, self.move_layer_controller.vlayer.fields(), self.timestamps[0], self.timestamps[-1])
+        # Create qgis features for all objects
+        self.generate_qgis_features()
 
         # Initiate request for first batch
         time_delta_key = start_tdelta_key
         beg_frame = time_delta_key
         end_frame = (time_delta_key + self.time_delta_size) -1
         self.last_recorded_time = time.time()
+        self.qgis_task_records = []
+        self.total_frames = 1440
 
-        task_matrix_gen = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps, self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid,  self.create_matrix, self.initiate_animation, self.raise_error)
-        self.task_manager.addTask(task_matrix_gen)     
+        task = Next_Time_Delta_thread(f"Data for time delta {time_delta_key}","Solution C", self.start_date, self.granularity_enum, beg_frame, end_frame,
+                                     self.extent, self.db, self.n_objects, self.SRID, self.initiate_animation, self.raise_error)
+        self.task_manager.addTask(task)     
         self.move_layer_controller.temporalController.updateTemporalRange.connect(self.on_new_frame)
+        # self.task_manager.allTasksFinished.connect(self.resume_animation)
+    
+
+    def update_geometries(self):
+        """
+        Updates the geometries of the features in the vector layer.
+        """
+        frame_number = self.previous_frame
+        timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
+        
+        for i in range(1, self.n_objects+1):
+            try:
+                position = self.current_tpoints[i-1][0].value_at_timestamp(timestamp)
+                self.geometries[i].fromWkb(position.wkb) 
+            except:
+                continue 
+        
+        for i in range(self.n_objects+1, self.objects_count+1):
+            self.geometries[i] = QgsGeometry()
+
+        self.move_layer_controller.vlayer.startEditing()
+        self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries) # Updating geometries for all features
+        self.move_layer_controller.vlayer.commitChanges()
+        self.iface.vectorLayerTools().stopEditing(self.move_layer_controller.vlayer)
 
 
+        self.geometries = {}
+        for i in range(1, self.n_objects+1):
+            geom = QgsGeometry()
+            self.geometries[i] = geom
+            self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries)
 
-    # Getters and Setters
+
+    def set_nobjects(self, n_objects):
+        if n_objects != self.n_objects:
+            self.n_objects = n_objects
+
+            self.update_geometries()
+        
+        
+
     def get_current_time_delta_key(self):
         return self.current_time_delta_key
     
     def get_last_frame(self):
         return self.previous_frame
 
-
     # Methods to handle initial setup 
 
-    def generate_qgis_features(self,num_objects, vlayer_fields,  start_date, end_date):
+    def generate_qgis_features(self):
         features_list =[]
-        start_datetime_obj = QDateTime(start_date)
-        end_datetime_obj = QDateTime(end_date)
-
-
-        for _ in range(num_objects):
+        object_ids = self.db.get_objects_ids()
+        start_datetime_obj = QDateTime(self.start_date)
+        end_datetime_obj = QDateTime(self.end_date)
+        num_objects = self.objects_count
+        vlayer_fields = self.move_layer_controller.get_vlayer_fields()
+        
+        self.geometries={}
+        for i in range(1, num_objects+1):
             feat = QgsFeature(vlayer_fields)
-            feat.setAttributes([start_datetime_obj, end_datetime_obj])
+            feat.setAttributes([ object_ids[i-1][0],start_datetime_obj, end_datetime_obj])
+            geom = QgsGeometry()
+            self.geometries[i] = geom
+            feat.setGeometry(geom)
             features_list.append(feat)
         
-        self.move_layer_controller.set_qgis_features(features_list)
-        self.log(f"{num_objects} Qgis features created")
+        self.move_layer_controller.add_features(features_list)
+        
+    
+    def update_fps(self, new_fps):
+        self.fps = new_fps
+        self.move_layer_controller.update_fps_cap(new_fps)
         
 
 
@@ -128,40 +160,28 @@ class MoveLayerHandler:
         """
         Once the first batch is fetched, make the request for the second and play the animation for this first time delta
         """
-        self.current_matrix = params['matrix']
-        matrix_time = time.time() - self.last_recorded_time
-        self.set_frame_rate(matrix_time)
+        self.current_tpoints = params['TgeomPoints_list']
 
-
+        qgis_task_time = time.time() - self.last_recorded_time
+        self.log(f"Time delta generation time : {qgis_task_time}")
+        self.qgis_task_records.append(qgis_task_time)
+ 
         # Request for second time delta
+    
         second_time_delta_key = self.time_delta_size
         self.fetch_next_data(second_time_delta_key)
         self.update_vlayer_features()
-
-    
-    def generate_timestamps(self):
-        """
-        Generate the timestamps associated to the dataset and the granularity selected.
-        """
-     
-        start_date = self.db.get_min_timestamp()
-        end_date = self.db.get_max_timestamp()
-        self.total_frames = math.ceil( (end_date - start_date) // self.granularity_enum.value["timedelta"] ) + 1
-        remainder_frames = (self.total_frames) % self.time_delta_size
-        self.total_frames +=  remainder_frames
-
-        self.timestamps = [start_date + i * self.granularity_enum.value["timedelta"] for i in range(self.total_frames)]
-        self.timestamps = [dt.replace(tzinfo=None) for dt in self.timestamps]
-        self.timestamps_strings = [dt.strftime('%Y-%m-%d %H:%M:%S') for dt in self.timestamps]
+        # self.resume_animation()
   
-  
+
+
 
     def initiate_temporal_controller_values(self):
         """
         Update the temporal controller values for the dataset
         """
         
-        time_range = QgsDateTimeRange(self.timestamps[0], self.timestamps[-1])
+        time_range = QgsDateTimeRange(self.start_date, self.end_date)
         interval = QgsInterval(self.granularity_enum.value["steps"], self.granularity_enum.value["qgs_unit"])
         frame_rate = self.fps
         
@@ -174,33 +194,39 @@ class MoveLayerHandler:
     # Methods to handle the animation and t_delta logic
 
     def shift_matrices(self):
-        self.previous_matrix = self.current_matrix
-        self.current_matrix = self.next_matrix
-        self.next_matrix = None 
+        self.previous_tpoints = self.current_tpoints
+        self.current_tpoints = self.next_tpoints
+        self.next_tpoints = None
 
 
-    # def resume_animation(self):
-    #     """
-    #     PLays the animation in the current direction.
-    #     """
-    #     self.move_layer_controller.play(self.direction) #TODO
+
+    def resume_animation(self):
+        """
+        PLays the animation in the current direction.
+        """
+        self.move_layer_controller.play(self.direction) #TODO
             
 
     def fetch_next_data(self, time_delta_key):
         """
         Creates a thread to fetch the data from the MobilityDB database for the given time delta.
         """
-        
-        self.log(f"pid : {self.pid} Qgis main process |  CPU affinity : {psutil.Process(self.pid).cpu_affinity()} \n") 
-        
+    
         beg_frame = time_delta_key
         end_frame = (time_delta_key + self.time_delta_size) -1
         self.log(f"Fetching data for time delta {beg_frame} : {end_frame}")
         if end_frame  <= self.total_frames and beg_frame >= 0: #Either bound has to be valid 
             self.last_recorded_time = time.time()
+            # self.move_layer_controller.pause_animation()
+            current_extent = self.move_layer_controller.get_current_canvas_extent()
 
-            task = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
-                                     self.objects_id_str, self.extent, self.timestamps,self.time_delta_size , self.connection_parameters, self.granularity_enum, self.srid, self.create_matrix, self.set_matrix, self.raise_error)
+            if current_extent != self.extent:
+                self.extent = current_extent
+                self.move_layer_controller.pause_animation()
+                self.iface.messageBar().pushMessage("Info", "Animation has paused to adapt to new canvas", level=Qgis.Info)
+            
+            task = Next_Time_Delta_thread(f"Data for time delta {time_delta_key}","Solution C", self.start_date, self.granularity_enum, beg_frame, end_frame,
+                                     self.extent, self.db, self.n_objects, self.SRID, self.on_thread_complete, self.raise_error)
             self.task_manager.addTask(task)        
 
 
@@ -208,57 +234,63 @@ class MoveLayerHandler:
     def on_new_frame(self):
         """
         Handles the logic at each frame change.
+      
         """
-        onf_time = time.time()
-        frame_number = self.move_layer_controller.get_current_frame_number()
-        if self.previous_frame - frame_number <= 0:
+        onf_time = time.time() 
+        frame_number = self.move_layer_controller.temporalController.currentFrameNumber()
+        forward = self.previous_frame + 1
+        backward = self.previous_frame - 1
+        if frame_number == forward:
+            # print("YOOHOO FORWARD")
             self.direction = 1 # Forward
-            if frame_number >= self.total_frames: # Reached the end of the animation, pause
-                self.move_layer_controller.pause()
-        else:
+            # if frame_number == 460: # Reached the end of the animation, pause
+            #     log("dsfjsdf")
+            #     self.move_layer_controller.pause_animation()
+        elif frame_number == backward:
+            # print("YOOHOO BACKWARD")
             self.direction = 0
             if frame_number <= 0: # Reached the beginning of the animation, pause
-                self.move_layer_controller.pause()
-            
+                self.move_layer_controller.pause_animation()
+        else:
+            print("HANDLE TEMPORAL CONTROLLER STATE CHANGE")
+            print(f"frame_number : {frame_number}, previous_frame : {self.previous_frame}") 
+            return False
+
         self.previous_frame = frame_number
 
         if frame_number % self.time_delta_size == 0:
             if self.direction == 1: # Animation is going forward
-                # self.log(f"------- FETCH NEXT BATCH  - forward - delta before : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
+                # log(f"------- FETCH NEXT BATCH  - forward - delta before : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
                 if self.current_time_delta_end + 1  != self.total_frames:
                     self.current_time_delta_key = frame_number
                     self.current_time_delta_end = (self.current_time_delta_key + self.time_delta_size) - 1
-                    # self.log(f"------- FETCH NEXT BATCH  - forward - delta after : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
+                    # log(f"------- FETCH NEXT BATCH  - forward - delta after : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
                     self.shift_matrices()
 
-                    # Pause the animation if the upcoming batch hasn't been fetched yet
                     if self.task_manager.countActiveTasks() != 0:
-                        self.move_layer_controller.pause()
-                    
+                        self.move_layer_controller.pause_animation()
+
                     self.fetch_next_data(self.current_time_delta_key+self.time_delta_size)                    
-                    
                     self.update_vlayer_features()
                     self.changed_key = True
 
                     
             else: # Animation is going backward
-                # self.log(f"------- FETCH NEXT BATCH  - backward - delta before : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
+                # log(f"------- FETCH NEXT BATCH  - backward - delta before : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
                 self.update_vlayer_features()  
                 if self.current_time_delta_key != 0: 
                     self.current_time_delta_key = self.current_time_delta_key - self.time_delta_size
                     self.current_time_delta_end = frame_number-1
-                    # self.log(f"------- FETCH NEXT BATCH  - backward - delta after : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
+                    # log(f"------- FETCH NEXT BATCH  - backward - delta after : {self.current_time_delta_key} - delta end : {self.current_time_delta_end}")
                     
                     self.shift_matrices()
-
-                    # Pause the animation if the upcoming batch hasn't been fetched yet
                     if self.task_manager.countActiveTasks() != 0:
-                        self.move_layer_controller.pause()
-                    self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
+                        self.move_layer_controller.pause_animation()
 
+                    self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
                     self.changed_key = True
             self.move_layer_controller.update_frame_rate(time.time()- onf_time)
-
+                  
         else:
             if self.changed_key:
                 if frame_number < self.current_time_delta_key:
@@ -267,7 +299,6 @@ class MoveLayerHandler:
                     self.changed_key = False
             self.update_vlayer_features()
             self.changed_key = False
-
             self.move_layer_controller.update_frame_rate(time.time()- onf_time)
         
 
@@ -276,64 +307,54 @@ class MoveLayerHandler:
         Updates the features of the vector layer for the given frame number.
         """
         try:
-            time_delta_key = self.current_time_delta_key
+            # time_delta_key = self.current_time_delta_key
             frame_number = self.previous_frame
-            frame_index = frame_number- time_delta_key
-     
-
-            current_time_stamp_column = self.current_matrix[:, frame_index]
-    
-            new_geometries = {}  
-            # new_geometries = {QgsGeometry().fromWkt(point) for point in current_time_stamp_column}  # Dictionary {feature_id: QgsGeometry}
-            for i in range(current_time_stamp_column.shape[0]): #TODO : compare vs Nditer
-                new_geometries[i] = QgsGeometry().fromWkt(current_time_stamp_column[i])
-
+            timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
+            
+            for i in range(1, self.objects_count+1):
+                try:
+                    position = self.current_tpoints[i-1][0].value_at_timestamp(timestamp)
+                    self.geometries[i].fromWkb(position.wkb) 
+                except:
+                    continue 
 
             self.move_layer_controller.vlayer.startEditing()
-            # self.move_layer_controller.vlayer.dataProvider().changeAttributeValues(attribute_changes) # Updating attribute values for all features
-            self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(new_geometries) # Updating geometries for all features
+            self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries) # Updating geometries for all features
             self.move_layer_controller.vlayer.commitChanges()
             self.iface.vectorLayerTools().stopEditing(self.move_layer_controller.vlayer)
 
         except Exception as e:
-            self.log(f"Error updating the features for time_delta : {self.current_time_delta_key} and frame number : {self.previous_frame}")
+            self.log(f"Error updating the features {e} for time_delta : {self.current_time_delta_key} and frame number : {self.previous_frame}")
 
 
-    def clean_handler_memory(self):
+    # Methods to handle the QGIS threads
+    def delete(self):
         self.db.close()
+        pymeos_finalize()
         self.task_manager = None
         self.previous_matrix = None
         self.current_matrix = None
         self.next_matrix = None
         self.move_layer_controller.temporalController.updateTemporalRange.disconnect(self.on_new_frame)
-        self.move_layer_controller.delete_vlayer()
-        self.move_layer_controller = None
-
-
-    # Methods to handle the QGIS threads
-
-
-    def set_frame_rate(self, matrix_generation_time):
-        uninterrupted_animation = self.time_delta_size / matrix_generation_time
-        new_fps = min(uninterrupted_animation, self.fps)
-        self.move_layer_controller.set_fps(new_fps)
-        self.log(f"Matrix time (start to end of QgisThread + new processes) : {matrix_generation_time} s | FPS for Uninterrupted animation : {uninterrupted_animation}")
-
-
-    def set_matrix(self, params):
-        """
-        Assign the new matrix to its tdelta key.
-        """
-       
-        # self.log("next matrix ready")
-        self.next_matrix = params['matrix']
-      
-
-        TIME_Qgs_Thread = time.time() - self.last_recorded_time
-        self.set_frame_rate(TIME_Qgs_Thread)
-      
         
+    
 
+
+    def set_frame_rate(self, new_fps):
+        self.move_layer_controller.set_fps(new_fps)
+
+
+    def on_thread_complete(self, params):
+        """
+        Assign the next time delta
+        """
+        self.log("Thread completed")
+        self.next_tpoints = params['TgeomPoints_list']
+      
+        TIME_Qgs_Thread = time.time() - self.last_recorded_time
+        self.log(f"time delta generation time : {TIME_Qgs_Thread}")
+        self.qgis_task_records.append(TIME_Qgs_Thread)
+      
 
     def raise_error(self, msg):
         """
@@ -344,11 +365,6 @@ class MoveLayerHandler:
         else:
             self.log("Unknown error")
 
-    
     def log(self, msg):
-        """
-        Function to log messages in the QGIS log window.
-        """
-        QgsMessageLog.logMessage(msg, 'qViz', level=Qgis.Info)
-
+        QgsMessageLog.logMessage(msg, "Move_layer", level=Qgis.Info)
 
