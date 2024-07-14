@@ -79,11 +79,7 @@ from .move_task import MoveTTask
 from .move_database_connector import Database_connector
 
 
-
-
-PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentage of the ships in the database
-TIME_DELTA_SIZE = 30  # Number of frames associated to one Time delta
-FPS = 60
+TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
 
 
 # DATASETS 
