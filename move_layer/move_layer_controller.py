@@ -19,12 +19,13 @@ class MoveLayerController:
     
     It handles the interactions with both the Temporal Controller and the Vector Layer.
     """
-    def __init__(self, iface, srid, FPS=60):
+    def __init__(self, iface, srid, FPS=60, tfloat_columns=[]):
         self.srid = srid
         self.iface = iface    
         self.canvas = self.iface.mapCanvas()
+        self.tfloat_columns = tfloat_columns
         self.create_vlayer()
-
+        
         self.canvas.setDestinationCrs(QgsCoordinateReferenceSystem(f"EPSG:{self.srid}"))
         self.temporalController = self.canvas.temporalController()
         self.temporalController.setCurrentFrameNumber(0)
@@ -49,7 +50,13 @@ class MoveLayerController:
         """
         self.vlayer = QgsVectorLayer("Point", "MobilityBD Data", "memory")
         pr = self.vlayer.dataProvider()
-        pr.addAttributes([QgsField("id", QVariant.Int) ,QgsField("start_time", QVariant.DateTime), QgsField("end_time", QVariant.DateTime)])
+
+        attributes_list = [QgsField("id", QVariant.Int) ,QgsField("start_time", QVariant.DateTime), QgsField("end_time", QVariant.DateTime)]
+
+        for tfloat in self.tfloat_columns:
+            attributes_list.append(QgsField(tfloat, QVariant.Double))
+
+        pr.addAttributes(attributes_list)
         self.vlayer.updateFields()
         tp = self.vlayer.temporalProperties()
         tp.setIsActive(True)

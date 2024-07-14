@@ -89,6 +89,7 @@ DATABASE_NAME = "mobilitydb"
 TPOINT_TABLE_NAME = "PyMEOS_demo"
 TPOINT_ID_COLUMN_NAME = "MMSI"
 TPOINT_COLUMN_NAME = "trajectory"
+TFLOAT_COLUMN_NAME = "sog"
 GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 
 ########## AIS Danish maritime dataset ##########
@@ -433,6 +434,7 @@ class Move:
                 'table_name': TPOINT_TABLE_NAME,
                 'id_column_name': TPOINT_ID_COLUMN_NAME,
                 'tpoint_column_name': TPOINT_COLUMN_NAME,
+                'tfloat_columns': [TFLOAT_COLUMN_NAME],
             }
         self.log(f"Connection params: {connection_parameters}")
         n_objects = self.dockwidget.spinbox_integer.value()

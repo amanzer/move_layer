@@ -24,7 +24,8 @@ class Database_connector:
 
             self.table_name = connection_parameters["table_name"]
             self.id_column_name = connection_parameters["id_column_name"]
-            self.tpoint_column_name = connection_parameters["tpoint_column_name"]     
+            self.tpoint_column_name = connection_parameters["tpoint_column_name"]   
+            self.tfloat_columns = connection_parameters["tfloat_columns"]  
             self.connection = MobilityDB.connect(**connection_params)
      
             self.cursor = self.connection.cursor()
@@ -48,6 +49,8 @@ class Database_connector:
     def get_objects_count(self):
         return self.objects_count
         
+    def get_tfloat_columns(self):
+        return self.tfloat_columns
 
     def get_min_timestamp(self):
         """
@@ -83,6 +86,11 @@ class Database_connector:
         objects_id_str = ', '.join(map(str, ids_list))
         # Part 1 : Fetch Tpoints from MobilityDB database
       
+        tfloat_query = ""
+        tfloat_query2 = ""
+        for tfloat_column in self.tfloat_columns:
+            tfloat_query += f", a.{tfloat_column}"
+            tfloat_query2 += f", rs.{tfloat_column}"
 
         query = f"""WITH trajectories as (
                 SELECT 
@@ -96,12 +104,12 @@ class Database_connector:
                             ),
                             tstzspan('[{p_start}, {p_end}]')
                         )
-                    ) as trajectory
+                    ) as trajectory {tfloat_query}
                 FROM public.{self.table_name} as a 
                 WHERE a.{self.id_column_name} in ({objects_id_str}))
             
                 SELECT
-                        rs.trajectory
+                        rs.trajectory {tfloat_query2}
                 FROM trajectories as rs ;"""
 
         self.cursor.execute(query)

@@ -34,6 +34,7 @@ class MoveLayerHandler:
         self.task_manager = tm
         # self.connection_parameters = connection_parameters
         self.db = db
+        self.tfloat_columns = self.db.get_tfloat_columns()
         self.fps = fps
         self.iface = iface
         self.time_delta_size = time_delta_size
@@ -44,7 +45,7 @@ class MoveLayerHandler:
         self.start_frame = start_frame
         pymeos_initialize()
         
-        self.move_layer_controller = MoveLayerController(self.iface, self.SRID, self.fps)
+        self.move_layer_controller = MoveLayerController(self.iface, self.SRID, self.fps, self.tfloat_columns)
         
         self.extent = self.move_layer_controller.get_initial_canvas_extent()
         self.start_date = self.db.get_min_timestamp()
@@ -94,6 +95,7 @@ class MoveLayerHandler:
         frame_number = self.previous_frame
         timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
         
+        
         for i in range(1, self.n_objects+1):
             try:
                 position = self.current_tpoints[i-1][0].value_at_timestamp(timestamp)
@@ -138,6 +140,7 @@ class MoveLayerHandler:
     def generate_qgis_features(self):
         features_list =[]
         object_ids = self.db.get_objects_ids()
+
         start_datetime_obj = QDateTime(self.start_date)
         end_datetime_obj = QDateTime(self.end_date)
         num_objects = self.objects_count
@@ -146,7 +149,10 @@ class MoveLayerHandler:
         self.geometries={}
         for i in range(1, num_objects+1):
             feat = QgsFeature(vlayer_fields)
-            feat.setAttributes([ object_ids[i-1][0],start_datetime_obj, end_datetime_obj])
+            attributes_list = [ object_ids[i-1][0],start_datetime_obj, end_datetime_obj]
+            for tfloat in self.tfloat_columns:
+                attributes_list.append( 0.0 )
+            feat.setAttributes(attributes_list)
             geom = QgsGeometry()
             self.geometries[i] = geom
             feat.setGeometry(geom)
@@ -176,7 +182,7 @@ class MoveLayerHandler:
         second_time_delta_key = self.time_delta_size
         self.fetch_next_data(second_time_delta_key)
         self.update_vlayer_features()
-        self.resume_animation()
+        # self.resume_animation()
   
 
 
@@ -248,18 +254,18 @@ class MoveLayerHandler:
         if frame_number == forward:
             # print("YOOHOO FORWARD")
             self.direction = 1 # Forward
-            if frame_number == 120: # Reached the end of the animation, pause
-                self.log("dsfjsdf")
-                self.move_layer_controller.pause_animation()
+            # if frame_number == 120: # Reached the end of the animation, pause
+            #     self.log("dsfjsdf")
+            #     self.move_layer_controller.pause_animation()
 
-                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_onf_record.pickle", "wb") as file:
-                    pickle.dump(self.onf_records, file)
+            #     with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_onf_record.pickle", "wb") as file:
+            #         pickle.dump(self.onf_records, file)
 
-                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_qgis_record.pickle", "wb") as file:
-                    pickle.dump(self.qgis_task_records, file)
+            #     with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_qgis_record.pickle", "wb") as file:
+            #         pickle.dump(self.qgis_task_records, file)
 
-                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_fps_record.pickle", "wb") as file:
-                    pickle.dump(self.move_layer_controller.fps_record, file)
+            #     with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_fps_record.pickle", "wb") as file:
+            #         pickle.dump(self.move_layer_controller.fps_record, file)
 
         elif frame_number == backward:
             # print("YOOHOO BACKWARD")
@@ -332,14 +338,22 @@ class MoveLayerHandler:
             frame_number = self.previous_frame
             timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
             
+            tfloat_values = {}
             for i in range(1, self.n_objects+1):
                 try:
                     position = self.current_tpoints[i-1][0].value_at_timestamp(timestamp)
                     self.geometries[i].fromWkb(position.wkb) 
+
+                    if len(self.tfloat_columns) > 0:
+                        attributes = {}
+                        for j in range(len(self.tfloat_columns)):
+                            attributes[j+3] = self.current_tpoints[i-1][j+1].value_at_timestamp(timestamp)
+                        tfloat_values[i] = attributes
                 except:
                     continue 
 
             self.move_layer_controller.vlayer.startEditing()
+            self.move_layer_controller.vlayer.dataProvider().changeAttributeValues(tfloat_values) 
             self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries) # Updating geometries for all features
             self.move_layer_controller.vlayer.commitChanges()
             self.iface.vectorLayerTools().stopEditing(self.move_layer_controller.vlayer)
