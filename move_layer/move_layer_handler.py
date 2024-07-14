@@ -19,8 +19,8 @@ from qgis.core import (
 from PyQt5.QtCore import QDateTime
 import math
 import time 
-import psutil
-import os 
+import pickle
+
 
 class MoveLayerHandler:
     """
@@ -75,6 +75,7 @@ class MoveLayerHandler:
         end_frame = (time_delta_key + self.time_delta_size) -1
         self.last_recorded_time = time.time()
         self.qgis_task_records = []
+        self.onf_records = []
         self.total_frames = 1440
 
         task = Next_Time_Delta_thread(f"Data for time delta {time_delta_key}","Solution C", self.start_date, self.granularity_enum, beg_frame, end_frame,
@@ -82,6 +83,7 @@ class MoveLayerHandler:
         self.task_manager.addTask(task)     
         self.move_layer_controller.temporalController.updateTemporalRange.connect(self.on_new_frame)
         # self.task_manager.allTasksFinished.connect(self.resume_animation)
+        
     
 
     def update_geometries(self):
@@ -115,10 +117,12 @@ class MoveLayerHandler:
             self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries)
 
 
+    def  pause_animation(self):
+        self.move_layer_controller.pause_animation()
+
     def set_nobjects(self, n_objects):
         if n_objects != self.n_objects:
             self.n_objects = n_objects
-            self.move_layer_controller.pause_animation()
             self.update_geometries()
         
         
@@ -172,7 +176,7 @@ class MoveLayerHandler:
         second_time_delta_key = self.time_delta_size
         self.fetch_next_data(second_time_delta_key)
         self.update_vlayer_features()
-        # self.resume_animation()
+        self.resume_animation()
   
 
 
@@ -244,9 +248,19 @@ class MoveLayerHandler:
         if frame_number == forward:
             # print("YOOHOO FORWARD")
             self.direction = 1 # Forward
-            # if frame_number == 460: # Reached the end of the animation, pause
-            #     log("dsfjsdf")
-            #     self.move_layer_controller.pause_animation()
+            if frame_number == 120: # Reached the end of the animation, pause
+                self.log("dsfjsdf")
+                self.move_layer_controller.pause_animation()
+
+                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_onf_record.pickle", "wb") as file:
+                    pickle.dump(self.onf_records, file)
+
+                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_qgis_record.pickle", "wb") as file:
+                    pickle.dump(self.qgis_task_records, file)
+
+                with open(f"/home/ali/move_layer/move_layer/laptop_results/Solution_C_{self.time_delta_size}_{self.n_objects}_fps_record.pickle", "wb") as file:
+                    pickle.dump(self.move_layer_controller.fps_record, file)
+
         elif frame_number == backward:
             # print("YOOHOO BACKWARD")
             self.direction = 0
@@ -290,7 +304,10 @@ class MoveLayerHandler:
 
                     self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
                     self.changed_key = True
-            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
+            # Calculating the optimal FPS based on the new frame time
+            optimal_fps = 1/ (time.time()- onf_time)
+            self.onf_records.append(optimal_fps)
+            self.move_layer_controller.update_frame_rate(optimal_fps)
                   
         else:
             if self.changed_key:
@@ -300,7 +317,10 @@ class MoveLayerHandler:
                     self.changed_key = False
             self.update_vlayer_features()
             self.changed_key = False
-            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
+            # Calculating the optimal FPS based on the new frame time
+            optimal_fps = 1/ (time.time()- onf_time)
+            self.onf_records.append(optimal_fps)
+            self.move_layer_controller.update_frame_rate(optimal_fps)
         
 
     def update_vlayer_features(self):
@@ -312,7 +332,7 @@ class MoveLayerHandler:
             frame_number = self.previous_frame
             timestamp = self.start_date + self.granularity_enum.value["timedelta"]  * frame_number
             
-            for i in range(1, self.objects_count+1):
+            for i in range(1, self.n_objects+1):
                 try:
                     position = self.current_tpoints[i-1][0].value_at_timestamp(timestamp)
                     self.geometries[i].fromWkb(position.wkb) 

@@ -128,13 +128,12 @@ class MoveLayerController:
         """
         self.temporalController.pause()
 
-    def update_frame_rate(self, new_frame_time):
+    def update_frame_rate(self, optimal_fps):
         """
         Updates the frame rate of the temporal controller to be the closest multiple of 5,
         favoring the lower value in case of an exact halfway.
         """
-        # Calculating the optimal FPS based on the new frame time
-        optimal_fps = 1 / new_frame_time
+        
         # Ensure FPS does not exceed 60
         fps = min(optimal_fps, self.fps_cap)
 

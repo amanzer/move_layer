@@ -145,6 +145,7 @@ class Move:
             self.translator.load(locale_path)
             QCoreApplication.installTranslator(self.translator)
 
+        self.move_layer_handler = None
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&Move')
@@ -328,6 +329,8 @@ class Move:
         
         """
         if self.move_layer_handler is not None:
+            self.move_layer_handler.pause_animation()
+            self.iface.messageBar().pushMessage("Info", "Animation paused to adjust to new cap on the number of objects", level=Qgis.Info)
             self.move_layer_handler.set_nobjects(value)
 
  
