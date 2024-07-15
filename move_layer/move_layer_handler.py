@@ -32,8 +32,8 @@ class MoveLayerHandler:
     def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
         clear_log = "\n"*10
         self.log(clear_log)
-        self.multicores = True
-
+        self.multicores = False
+        self.onf_record = [] 
         self.fps = 100
         self.time_delta_size = time_delta_size
         self.srid = SRID
@@ -44,9 +44,9 @@ class MoveLayerHandler:
         pymeos_initialize()
         
         self.move_layer_controller = MoveLayerController(self.iface, self.srid, self.fps)
+        self.move_layer_controller.set_fps_cap(100)
         
-        
-        self.extent = self.move_layer_controller.get_canvas_extent()
+        self.extent = self.move_layer_controller.get_initial_canvas_extent()
         self.db = DatabaseConnector(self.connection_parameters, self.extent, percentage_of_objects, self.srid)
         self.generate_timestamps()
 
@@ -65,7 +65,7 @@ class MoveLayerHandler:
         self.previous_matrix = None
         self.current_matrix = None
         self.next_matrix = None
-
+        
         self.objects_count = self.db.get_objects_count()
         self.pid = os.getpid()
         if self.multicores: # Keep all the ids in memory
@@ -200,6 +200,13 @@ class MoveLayerHandler:
         end_frame = (time_delta_key + self.time_delta_size) -1
         self.log(f"Fetching data for time delta {beg_frame} : {end_frame}")
         if end_frame  <= self.total_frames and beg_frame >= 0: #Either bound has to be valid 
+            current_extent = self.move_layer_controller.get_current_canvas_extent()
+            if current_extent != self.extent:
+                self.extent = current_extent
+                self.pause_animation()
+                self.iface.messageBar().pushMessage("Info", "Animation has paused : Canvas extent has changed", level=Qgis.Info)
+                # self.log(f"Extent updated to {self.extent}")
+                
             self.last_recorded_time = time.time()
 
             task = Matrix_generation_thread(f"Data for time delta {time_delta_key} : {self.timestamps_strings[time_delta_key]}","qViz", beg_frame, end_frame,
@@ -207,6 +214,25 @@ class MoveLayerHandler:
             self.task_manager.addTask(task)        
 
 
+    def set_nobjects(self, nobjects):
+        pass
+
+
+    def update_fps(self, fps):
+        self.move_layer_controller.set_fps_cap(fps)
+    
+    def refresh(self):
+        """
+        Refreshes the animation and the data.
+        """
+        pass
+
+    def pause_animation(self):
+        """
+        Pauses the animation.
+        """
+        self.move_layer_controller.pause()
+        
         
     def on_new_frame(self):
         """
@@ -260,7 +286,9 @@ class MoveLayerHandler:
                     self.fetch_next_data(self.current_time_delta_key-self.time_delta_size)
 
                     self.changed_key = True
-            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
+            onf_fps =  1 / (time.time() - onf_time)
+            self.onf_record.append(onf_fps)
+            self.move_layer_controller.update_frame_rate(onf_fps)
 
         else:
             if self.changed_key:
@@ -271,7 +299,9 @@ class MoveLayerHandler:
             self.update_vlayer_features()
             self.changed_key = False
 
-            self.move_layer_controller.update_frame_rate(time.time()- onf_time)
+            onf_fps =  1 / (time.time() - onf_time)
+            self.onf_record.append(onf_fps)
+            self.move_layer_controller.update_frame_rate(onf_fps)
         
 
     def update_vlayer_features(self):

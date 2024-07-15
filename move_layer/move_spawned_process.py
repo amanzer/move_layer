@@ -102,18 +102,18 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
             # else:
             #     rows_to_remove.append(i)
         
-        matrix = np.delete(matrix, rows_to_remove, axis=0) 
+        # matrix = np.delete(matrix, rows_to_remove, axis=0) 
 
         logs += f"Matrix generation time : {time.time() - now_matrix}\n"
         logs += f"Matrix shape : {matrix.shape}\n"
-        logs += f"Number of non empty points : {np.count_nonzero(matrix != 'POINT EMPTY')}\n"
+
 
         result_queue.put(0)
         result_queue.put(matrix)
         result_queue.put(logs)
     except Exception as e:
         result_queue.put(1)
-        result_queue.put(e)
+        result_queue.put(f"UKULELELLELLELE {e}")
         result_queue.put(logs)
         return False
     

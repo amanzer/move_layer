@@ -96,7 +96,7 @@ import gc
 
 
 PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentage of the ships in the database
-TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
+TIME_DELTA_SIZE = 30  # Number of frames associated to one Time delta
 FPS = 60
 
 
@@ -159,6 +159,7 @@ class Move:
             self.translator.load(locale_path)
             QCoreApplication.installTranslator(self.translator)
 
+        self.move_layer_handler = None
         # Declare instance attributes
         self.actions = []
         self.menu = self.tr(u'&Move')
@@ -275,6 +276,7 @@ class Move:
         #print "** CLOSING Move"
 
         # disconnects
+        del self.move_layer_handler
         self.dockwidget.closingPlugin.disconnect(self.onClosePlugin)
         self.dockwidget.combo_database.activated[str].disconnect(
             self.onDbChanged)
@@ -321,16 +323,54 @@ class Move:
             self.dockwidget.closingPlugin.connect(self.onClosePlugin)
             self.dockwidget.combo_database.activated[str].connect(
                 self.onDbChanged)
+            self.dockwidget.combo_fps.activated[str].connect(self.onFpsChanged)
+            self.dockwidget.button_help.clicked.connect(self.show_help)
             self.dockwidget.button_execute.clicked.connect(self.execute)
             self.dockwidget.button_refresh.clicked.connect(self.refresh)
-
+            self.dockwidget.spinbox_integer.valueChanged.connect(self.number_changed)
             self.project_title = QgsProject.instance().title().lower().replace(" ", "_")
             self.setDatabaseComboBox()
-
+            self.setFPSComboBox()
             # show the dockwidget
             # TODO: fix to allow choice of dock location
             self.iface.addDockWidget(Qt.BottomDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
+    
+    def number_changed(self, value):
+        """
+        When the user selects a different number in the spinbox, this function restricts the amount of tgeompoints visible on screen
+        In turn accelerating the VAT Calculation 
+        
+        """        
+        if self.move_layer_handler is not None:
+            self.move_layer_handler.pause_animation()
+            self.iface.messageBar().pushMessage("Info", "Animation paused to adjust to new cap on the number of objects", level=Qgis.Info)
+            self.move_layer_handler.set_nobjects(value)
+            
+ 
+
+        
+
+    def show_help(self):
+        self.iface.messageBar().pushMessage("Error", "I'm sorry Dave, I'm afraid I can't do that", level=Qgis.Info)
+
+    def setFPSComboBox(self):
+        self.dockwidget.combo_fps.clear()
+
+        fps = [1, 5, 10, 15, 20, 25, 30, 60, 100]
+        for f in fps:
+            self.dockwidget.combo_fps.addItem(str(f))
+            # self.move_handler.update_fps(f)
+            self.set_execute_enabled(True)
+        self.dockwidget.combo_fps.setCurrentIndex(fps.index(60))
+
+    def onFpsChanged(self, fps):
+        self.log(f"FPS changed to {fps}")
+        if self.move_layer_handler is not None:
+            self.move_layer_handler.update_fps(int(fps))
+        # pass
+        # self.log(f"FPS changed to {fps}")
+        # self.move_handler.update_fps(int(fps))
 
     def setDatabaseComboBox(self):
         self.dockwidget.combo_database.clear()
@@ -429,6 +469,67 @@ class Move:
             self.ran_once = False
             self.set_execute_enabled(True)
 
+
+    def run_query(self, query):
+        if not query.resolve_types(self.db):
+            self.log("Error: " + query.error_msg)
+            return
+        self.log("Query return types: " + ", ".join(query.column_types))
+        if query.has_geom_columns():
+            # task = MoveGeomTask("Move: Creating geom view", query,
+            #                     self.project_title, self.db,
+            #                     self.add_geom_layers, self.raise_error)
+            # self.tm.addTask(task)
+            pass
+        if query.has_temp_columns():
+            temp_cols = query.temp_cols()
+            for col in temp_cols:
+                if query.column_types[col] == 'tgeometry':
+                    pass
+                    # task = MoveTTask(f"Move: Creating tgeom view {col}", query,
+                    #                  self.project_title, self.db, col,
+                    #                  self.add_tgeom_layer, self.raise_error)
+                else:
+                    task = MoveTTask(f"Move: Creating tpoint view {col}",
+                                     query, self.project_title, self.db, col,
+                                     self.add_tpoint_layer, self.raise_error)
+                self.tm.addTask(task)
+
+    def add_tpoint_layer(self, db, query, params):
+        if params['type'] == 0:
+            col_id = params['col_id']
+            sql_parts = params['view_name']
+            inner_sql = params['srid']
+            self.log(f"Adding tpoint layer for {col_id} with sql: {sql_parts} and srid: {inner_sql}")
+        else:
+            pass
+            # view_name = params['view_name']
+            # uri = QgsDataSourceUri()
+            # uri.setConnection(db['host'], db['port'], db['database'],
+            #                 db['username'], db['password'],
+            #                 QgsDataSourceUri.SslDisable)
+            # uri.setDataSource("public", view_name, "geom", "", "id")
+            # uri.setSrid(str(params['srid']))
+            # uri.setWkbType(QgsWkbTypes.LineStringM)
+            # layer_name = query.column_names[params['col_id']]
+            # layer = self.iface.addVectorLayer(uri.uri(), layer_name, "postgres")
+            # if not layer or not layer.isValid():
+            #     self.msg("Layer failed to load!")
+            # else:
+            #     layer.setCustomProperty('move/view_name', view_name)
+            #     layer.setCustomProperty('move/sql', query.raw_sql)
+            #     layer.temporalProperties().setIsActive(True)
+            #     pointGeneratorLayer = QgsGeometryGeneratorSymbolLayer.create({
+            #         'SymbolType':
+            #         'Marker',
+            #         'geometryModifier':
+            #         'line_interpolate_point(\n  $geometry,\n  1.0 * (\n    ( epoch(@map_end_time)/1000 )\n    - m(start_point($geometry))\n  ) / (\n    m(end_point($geometry))\n    - m(start_point($geometry))\n  )\n  * length($geometry)\n) '
+            #     })
+            #     layer.renderer().symbol().changeSymbolLayer(0, pointGeneratorLayer)
+            #     layer.triggerRepaint()
+            #     self.iface.layerTreeView().refreshLayerSymbology(layer.id())
+
+
     def raise_error(self, msg):
         if msg:
             self.log("Error: " + msg)
@@ -441,12 +542,33 @@ class Move:
     def log(self, msg):
         QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
 
+    # def clean(self):
+    #     select_sql = f"""
+    #         select 'drop materialized view ' || relname || ';'
+    #         from pg_class
+    #         where relkind = 'm'
+    #         and relname like 'move@_{self.project_title}@_%' escape '@'
+    #     """
 
+    #     view_names = self.get_layer_view_names()
+    #     if view_names:
+    #         select_sql += f" and relname not in ({view_names})"
 
-
-
-
-
+    #     try:
+    #         with psycopg.connect(
+    #                 host=self.db['host'],
+    #                 port=self.db['port'],
+    #                 dbname=self.db['database'],
+    #                 user=self.db['username'],
+    #                 password=self.db['password']) as conn:
+    #             with conn.cursor() as cur:
+    #                 cur.execute(select_sql)
+    #                 drop_sqls = cur.fetchall()
+    #                 for drop_sql, in drop_sqls:
+    #                     cur.execute(drop_sql)
+    #                 conn.commit()
+    #     except psycopg.Error as e:
+    #         pass
 
 
 

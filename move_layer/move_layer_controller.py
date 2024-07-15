@@ -59,8 +59,11 @@ class MoveLayerController:
 
     # Getters
 
-    def get_canvas_extent(self):
+    def get_initial_canvas_extent(self):
         return self.extent
+
+    def get_current_canvas_extent(self):
+        return self.canvas.extent().toRectF().getCoords()
     
 
     def get_current_frame_number(self):
@@ -102,7 +105,10 @@ class MoveLayerController:
             self.vlayer.dataProvider().addFeatures(features_list)
 
     def set_fps(self, fps):
-        self.fps = fps
+        self.fps = min(fps, self.fps_cap)
+
+    def set_fps_cap(self, fps):
+        self.fps_cap = fps
 
     # Methods to handle the temporal controller
     
@@ -123,19 +129,19 @@ class MoveLayerController:
         self.temporalController.pause()
 
 
-    def update_frame_rate(self, new_frame_time):
+    def update_frame_rate(self, optimal_fps):
         """
         Updates the frame rate of the temporal controller to be the closest multiple of 5,
         favoring the lower value in case of an exact halfway.
         """
         # Calculating the optimal FPS based on the new frame time
-        optimal_fps = 1 / new_frame_time
+        
         # Ensure FPS does not exceed 60
         fps = min(optimal_fps, self.fps)
 
         self.temporalController.setFramesPerSecond(fps)
         self.log(f"FPS : {fps}      |      ONF : {optimal_fps}      |      Matrix {self.fps}")
-        self.fps_record.append(optimal_fps)
+        self.fps_record.append(fps)
 
 
     
