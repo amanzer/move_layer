@@ -80,11 +80,12 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
 
         logs += f"Number of rows : {len(rows)}\n"
         now_matrix =time.time()
-        empty_point_wkt = Point().wkt  # "POINT EMPTY"
-        matrix = np.full((len(rows), time_delta_size), empty_point_wkt, dtype=object)
+        empty_point_wkb = Point().wkb  # "POINT EMPTY"
+        dtype = np.dtype(f'V{25}')
+        matrix = np.full((len(rows), time_delta_size), empty_point_wkb, dtype=dtype)
         
         
-        rows_to_remove = []
+        # rows_to_remove = []
         for i in range(len(rows)):
             if rows[i][2] is not None:
                 try:
@@ -92,14 +93,14 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
 
                     start_index = rows[i][0] - begin_frame
                     end_index = rows[i][1] - begin_frame
-                    values = np.array([point.wkt for point in traj_resampled.values()])
+                    values = np.array([point.wkb for point in traj_resampled.values()])
                     matrix[i, start_index:end_index+1] = values
             
                 except Exception as e:
                     logs += f"Error at row {i} : {e}\n"
                     break
-            else:
-                rows_to_remove.append(i)
+            # else:
+            #     rows_to_remove.append(i)
         
         matrix = np.delete(matrix, rows_to_remove, axis=0) 
 
@@ -133,7 +134,7 @@ def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_
         psutil.Process(pid).cpu_affinity(cpus) # Assign the process to the last 4 cores
 
         logs += (f"pid : {pid} create_matrix |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
-        empty_point_wkt = Point().wkt  # "POINT EMPTY"
+        empty_point_wkb = Point().wkb  # "POINT EMPTY"
       
 
         
@@ -158,7 +159,8 @@ def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_
         # pool.map(process_chunk2, worker_args)
         results = pool.map(worker_fnc, worker_args)
         
-        matrix = np.full((len(total_ids), time_delta_size), empty_point_wkt, dtype=object)
+        dtype = np.dtype(f'V{25}')
+        matrix = np.full((len(total_ids), time_delta_size), empty_point_wkb, dtype=dtype)
 
         # check if one of results first argument is 1, if so, raise an error
         for i, (status, chunk_matrix, worker_logs) in enumerate(results):

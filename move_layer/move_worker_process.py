@@ -8,7 +8,7 @@ def worker_fnc(args):
     try:
         from pymeos.db.psycopg import MobilityDB
         ids, begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, extent, srid, timestamps, cpus = args
-        empty_point_wkt = "POINT EMPTY"
+        empty_point_wkb = Point().wkb
         start_date = timestamps[0]
 
         connection_params = {
@@ -79,8 +79,8 @@ def worker_fnc(args):
         connection.close()
 
      
-
-        chunk_matrix = np.full((len(rows), time_delta_size), empty_point_wkt, dtype=object)
+        dtype = np.dtype(f'V{25}')
+        chunk_matrix = np.full((len(rows), time_delta_size), empty_point_wkb, dtype=dtype)
         logs = f"pid : {pid} assigned to cpu : {cpus} \n"
 
         for i in range(len(rows)):
@@ -90,7 +90,7 @@ def worker_fnc(args):
 
                     start_index = rows[i][0] - begin_frame
                     end_index = rows[i][1] - begin_frame
-                    values = np.array([point.wkt for point in traj_resampled.values()])
+                    values = np.array([point.wkb for point in traj_resampled.values()])
                     chunk_matrix[i, start_index:end_index+1] = values
                 except:
                     raise ValueError(f"Error in asignation : {start_index} - {end_index} | begin_frame : {begin_frame} | end_frame : {end_frame} | pstart {p_start} | pend {p_end} | start_date {start_date} | {len(rows[i][2].values())} \n {query}")

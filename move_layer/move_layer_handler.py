@@ -32,7 +32,7 @@ class MoveLayerHandler:
     def __init__(self, iface, connection_parameters, tm, time_delta_size, percentage_of_objects, SRID, granularity_enum, start_tdelta_key, start_frame):
         clear_log = "\n"*10
         self.log(clear_log)
-        self.multicores = False
+        self.multicores = True
 
         self.fps = 100
         self.time_delta_size = time_delta_size
@@ -113,10 +113,13 @@ class MoveLayerHandler:
         start_datetime_obj = QDateTime(start_date)
         end_datetime_obj = QDateTime(end_date)
 
-
-        for _ in range(num_objects):
+        self.geometries = {}
+        for i in range(1, num_objects+1):
             feat = QgsFeature(vlayer_fields)
             feat.setAttributes([start_datetime_obj, end_datetime_obj])
+            geom = QgsGeometry()
+            self.geometries[i] = geom
+            feat.setGeometry(geom)
             features_list.append(feat)
         
         self.move_layer_controller.set_qgis_features(features_list)
@@ -283,20 +286,20 @@ class MoveLayerHandler:
 
             current_time_stamp_column = self.current_matrix[:, frame_index]
     
-            new_geometries = {}  
+            # new_geometries = {}  
             # new_geometries = {QgsGeometry().fromWkt(point) for point in current_time_stamp_column}  # Dictionary {feature_id: QgsGeometry}
-            for i in range(current_time_stamp_column.shape[0]): #TODO : compare vs Nditer
-                new_geometries[i] = QgsGeometry().fromWkt(current_time_stamp_column[i])
+            for i in range(1, current_time_stamp_column.shape[0]+1): #TODO : compare vs Nditer
+                self.geometries[i].fromWkb(current_time_stamp_column[i-1].tobytes())
 
 
             self.move_layer_controller.vlayer.startEditing()
             # self.move_layer_controller.vlayer.dataProvider().changeAttributeValues(attribute_changes) # Updating attribute values for all features
-            self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(new_geometries) # Updating geometries for all features
+            self.move_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries) # Updating geometries for all features
             self.move_layer_controller.vlayer.commitChanges()
             self.iface.vectorLayerTools().stopEditing(self.move_layer_controller.vlayer)
 
         except Exception as e:
-            self.log(f"Error updating the features for time_delta : {self.current_time_delta_key} and frame number : {self.previous_frame}")
+            self.log(f"{e} -Error updating the features for time_delta : {self.current_time_delta_key} and frame number : {self.previous_frame}")
 
 
     def clean_handler_memory(self):
