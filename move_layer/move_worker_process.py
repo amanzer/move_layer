@@ -7,9 +7,9 @@ import traceback
 def worker_fnc(args):
     try:
         from pymeos.db.psycopg import MobilityDB
-        ids, begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, extent, srid, timestamps, cpus = args
+        ids_tuple, begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, srid, start_date, p_start, p_end , cpus = args
+        
         empty_point_wkb = Point().wkb
-        start_date = timestamps[0]
 
         connection_params = {
             "host": connection_parameters["host"],
@@ -27,14 +27,8 @@ def worker_fnc(args):
         psutil.Process(pid).cpu_affinity([cpus])
             
 
-        ids_list_str = [ f"'{id[0]}'"  for id in ids]
-        ids_str = ', '.join(map(str, ids_list_str))
 
-
-        p_start = timestamps[begin_frame]
-        p_end = timestamps[end_frame]
-        start_date = timestamps[0]
-        x_min,y_min, x_max, y_max = extent
+   
         
         connection = MobilityDB.connect(**connection_params)    
         cursor = connection.cursor()
@@ -46,40 +40,41 @@ def worker_fnc(args):
 
         query = f"""WITH trajectories as (
                 SELECT 
-                    atStbox(
-                        a.{tpoint_column_name}::tgeompoint,
-                        stbox(
-                            ST_MakeEnvelope(
-                                {x_min}, {y_min}, -- xmin, ymin
-                                {x_max}, {y_max}, -- xmax, ymax
-                                {srid} -- SRID
-                            ),
-                            tstzspan('[{p_start}, {p_end}]')
-                        )
-                    ) as trajectory
-                FROM public.{table_name} as a 
-                WHERE a.{id_column_name} in ({ids_str})),
+
+                    attime({tpoint_column_name}::tgeompoint,
+	                        span('{p_start}'::timestamptz, 
+                                '{p_end}'::timestamptz, true, true)) as trip
+                    FROM public.{table_name}
+                    WHERE id between {ids_tuple[0]} and {ids_tuple[1]}),
+
 
                 resampled as (
 
-                SELECT tsample(traj.trajectory, INTERVAL '{granularity_enum.value["steps"]} {granularity_enum.value["name"]}', TIMESTAMP '{start_date}')  AS resampled_trajectory
+                SELECT tsample(trip, INTERVAL '{granularity_enum.value["steps"]} {granularity_enum.value["name"]}', TIMESTAMP '{start_date}')  AS resampled_trip
                     FROM 
-                        trajectories as traj)
+                        trajectories)
             
                 SELECT
-                        EXTRACT(EPOCH FROM (startTimestamp(rs.resampled_trajectory) - '{start_date}'::timestamp))::integer / {time_value} AS start_index ,
-                        EXTRACT(EPOCH FROM (endTimestamp(rs.resampled_trajectory) - '{start_date}'::timestamp))::integer / {time_value} AS end_index,
-                        rs.resampled_trajectory
-                FROM resampled as rs ;"""
+                        EXTRACT(EPOCH FROM (startTimestamp(resampled_trip) - '{start_date}'::timestamp))::integer / {time_value} AS start_index ,
+                        EXTRACT(EPOCH FROM (endTimestamp(resampled_trip) - '{start_date}'::timestamp))::integer / {time_value} AS end_index,
+                        resampled_trip
+                FROM resampled;"""
 
         cursor.execute(query)
         # logs += f"query : {query}\n"
-        rows = cursor.fetchall()
+
+        rows= []
+        while True:
+            results = cursor.fetchmany(1000)
+            if not results:
+                break
+            rows.extend(results)
+
         cursor.close()
         connection.close()
 
      
-        dtype = np.dtype(f'V{25}')
+        dtype = object
         chunk_matrix = np.full((len(rows), time_delta_size), empty_point_wkb, dtype=dtype)
         logs = f"pid : {pid} assigned to cpu : {cpus} \n"
 

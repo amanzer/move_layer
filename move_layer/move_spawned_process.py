@@ -13,18 +13,15 @@ from shapely.geometry import Point
 import multiprocessing
 
 
-def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent, timestamps, connection_parameters, granularity_enum, srid, ids_str):
+def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, start_date, p_start, p_end, connection_parameters, granularity_enum, srid, total_trajectories):
     try:
         logs=""
         pid = os.getpid()
         logs += (f"pid : {pid} create_matrix |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
-        p_start = timestamps[begin_frame]
-        p_end = timestamps[end_frame]
-        start_date = timestamps[0]
-        x_min,y_min, x_max, y_max = extent
+       
+
         logs = ""
-        
-        # Part 1 : Fetch Tpoints from MobilityDB database
+
         connection_params = {
             "host": connection_parameters["host"],
             "port": connection_parameters["port"],
@@ -46,46 +43,44 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
 
         query = f"""WITH trajectories as (
                 SELECT 
-                    atStbox(
-                        a.{tpoint_column_name}::tgeompoint,
-                        stbox(
-                            ST_MakeEnvelope(
-                                {x_min}, {y_min}, -- xmin, ymin
-                                {x_max}, {y_max}, -- xmax, ymax
-                                {srid} -- SRID
-                            ),
-                            tstzspan('[{p_start}, {p_end}]')
-                        )
-                    ) as trajectory
-                FROM public.{table_name} as a 
-                WHERE a.{id_column_name} in ({ids_str})),
+
+                    attime({tpoint_column_name}::tgeompoint,
+	                        span('{p_start}'::timestamptz, 
+                                '{p_end}'::timestamptz, true, true)) as trip
+                    FROM public.{table_name} LIMIT {total_trajectories}),
+
 
                 resampled as (
 
-                SELECT tsample(traj.trajectory, INTERVAL '{granularity_enum.value["steps"]} {granularity_enum.value["name"]}', TIMESTAMP '{start_date}')  AS resampled_trajectory
+                SELECT tsample(trip, INTERVAL '{granularity_enum.value["steps"]} {granularity_enum.value["name"]}', TIMESTAMP '{start_date}')  AS resampled_trip
                     FROM 
-                        trajectories as traj)
+                        trajectories)
             
                 SELECT
-                        EXTRACT(EPOCH FROM (startTimestamp(rs.resampled_trajectory) - '{start_date}'::timestamp))::integer / {time_value} AS start_index ,
-                        EXTRACT(EPOCH FROM (endTimestamp(rs.resampled_trajectory) - '{start_date}'::timestamp))::integer / {time_value} AS end_index,
-                        rs.resampled_trajectory
-                FROM resampled as rs ;"""
+                        EXTRACT(EPOCH FROM (startTimestamp(resampled_trip) - '{start_date}'::timestamp))::integer / {time_value} AS start_index ,
+                        EXTRACT(EPOCH FROM (endTimestamp(resampled_trip) - '{start_date}'::timestamp))::integer / {time_value} AS end_index,
+                        resampled_trip
+                FROM resampled;"""
 
         cursor.execute(query)
         # logs += f"query : {query}\n"
-        rows = cursor.fetchall()
+        rows= []
+        while True:
+            results = cursor.fetchmany(1000)
+            if not results:
+                break
+            rows.extend(results)
         cursor.close()
         connection.close()
 
         logs += f"Number of rows : {len(rows)}\n"
         now_matrix =time.time()
         empty_point_wkb = Point().wkb  # "POINT EMPTY"
-        dtype = np.dtype(f'V{25}')
+        dtype = object
         matrix = np.full((len(rows), time_delta_size), empty_point_wkb, dtype=dtype)
         
         
-        # rows_to_remove = []
+   
         for i in range(len(rows)):
             if rows[i][2] is not None:
                 try:
@@ -99,10 +94,7 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
                 except Exception as e:
                     logs += f"Error at row {i} : {e}\n"
                     break
-            # else:
-            #     rows_to_remove.append(i)
-        
-        # matrix = np.delete(matrix, rows_to_remove, axis=0) 
+
 
         logs += f"Matrix generation time : {time.time() - now_matrix}\n"
         logs += f"Matrix shape : {matrix.shape}\n"
@@ -121,11 +113,10 @@ def create_matrix( result_queue, begin_frame, end_frame, time_delta_size, extent
 
 
 
-def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_size, extent, timestamps, connection_parameters, granularity_enum, srid, total_ids):
+def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_size, start_date, p_start, p_end, connection_parameters, granularity_enum, srid, total_trajectories):
     try:
         logs=""
 
-        # cpus = [[x, x+1] for x in range(2, 12, 2)]
         cpu_count = psutil.cpu_count()
         half_cpu_count = cpu_count // 2
         cpus = [i for i in range(half_cpu_count, cpu_count)]
@@ -138,40 +129,33 @@ def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_
       
 
         
-
-        num_workers = len(cpus)-1
-        # logs += f"Number of workers : {num_workers}\n"
-        ids_per_process = int(np.ceil(len(total_ids)) / num_workers)
-        
-       
-
-        # Distributing the ids to the workers
-        ids_sub_list = [total_ids[i:i+ids_per_process] for i in range(0, len(total_ids), ids_per_process)] 
-
+        num_workers = len(cpus)
+        # Distributing the rows to the workers
+        rows_per_process = int(np.ceil(total_trajectories / num_workers))
+        ids_per_process = [(i, (i+rows_per_process)-1) for i in range(1, total_trajectories, rows_per_process)]
 
         pool = multiprocessing.Pool(num_workers)
 
         
-        logs += f"{cpus[0]}"
-        worker_args = [(ids_sub_list[i], begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, extent, srid, timestamps, cpus[i]) for i in range(len(ids_sub_list))]
+        worker_args = [(ids_per_process[i], begin_frame, end_frame, time_delta_size, connection_parameters, granularity_enum, srid, start_date, p_start, p_end , cpus[i]) for i in range(len(ids_per_process))]
         
-        
-        # pool.map(process_chunk2, worker_args)
         results = pool.map(worker_fnc, worker_args)
         
-        dtype = np.dtype(f'V{25}')
-        matrix = np.full((len(total_ids), time_delta_size), empty_point_wkb, dtype=dtype)
+        dtype = object
+        matrix = np.full((total_trajectories, time_delta_size), empty_point_wkb, dtype=dtype)
 
-        # check if one of results first argument is 1, if so, raise an error
+
         for i, (status, chunk_matrix, worker_logs) in enumerate(results):
             if status == 1:
+                logs += f"Error in worker {i} \n"
                 raise ValueError(worker_logs)
 
-            start_idx = i * ids_per_process
+            start_idx = i * rows_per_process
             end_idx = start_idx + len(chunk_matrix)
             matrix[start_idx:end_idx, :] = chunk_matrix
             logs += worker_logs
 
+        
 
         result_queue.put(0)
         result_queue.put(matrix)
@@ -181,7 +165,7 @@ def create_matrix_multi_cores( result_queue, begin_frame, end_frame, time_delta_
     except Exception as e:
         result_queue.put(1)
         result_queue.put(e)
-        result_queue.put(logs)
+        result_queue.put(logs + "OOGABOOGA" + f"{ids_per_process} - {cpus}")
         return False
 
     finally:

@@ -21,38 +21,30 @@ class DatabaseConnector:
             self.percentage_of_objects = percentage_of_objects
             self.srid = srid
             self.table_name = connection_parameters["table_name"]
-            self.id_column_name = connection_parameters["id_column_name"]
+            # self.id_column_name = connection_parameters["id_column_name"]
             self.tpoint_column_name = connection_parameters["tpoint_column_name"]     
             self.connection = MobilityDB.connect(**connection_params)
-            x_min,y_min, x_max, y_max = extent
+            # x_min,y_min, x_max, y_max = extent
             self.cursor = self.connection.cursor()
-            query = f"""
-                                WITH trajectories as (
-                                    SELECT 
-                                        atStbox(
-                                            a.{self.tpoint_column_name}::tgeompoint,
-                                            stbox(
-                                                ST_MakeEnvelope(
-                                                    {x_min}, {y_min}, -- xmin, ymin
-                                                    {x_max}, {y_max}, -- xmax, ymax
-                                                    {self.srid} -- SRID
-                                                )
-                                            )
-                                        ) as trajectory, a.{self.id_column_name} as id
-                                    FROM public.{self.table_name} as a )
 
-                                    SELECT tr.id                            
-                                    FROM trajectories as tr where tr.trajectory is not null ;
-                                """
-            
-            self.cursor.execute(query)
+            query_check_column = f"""
+                                    SELECT column_name
+                                    FROM information_schema.columns
+                                    WHERE table_name='{self.table_name}' AND column_name='id';
+                                    """
+            self.cursor.execute(query_check_column)
+            column_exists = self.cursor.fetchone()
+            if not column_exists:
+                query_create_id = f""" ALTER TABLE public.{self.table_name} ADD COLUMN id SERIAL UNIQUE;"""
+                self.cursor.execute(query_create_id)
+                query_create_index = f""" CREATE INDEX idx_id ON public.{self.table_name} (id); """
+                self.cursor.execute(query_create_index)
+
+            query_index = f""" SELECT max(id) FROM public.{self.table_name}; """
+            self.cursor.execute(query_index)
+            self.objects_count = self.cursor.fetchone()[0]
+
     
-            self.ids_list = self.cursor.fetchall()
-            self.ids_list = self.ids_list[:int(len(self.ids_list)*self.percentage_of_objects)]
-            self.objects_count = len(self.ids_list)
-
-            ids_list = [ f"'{id[0]}'"  for id in self.ids_list]
-            self.objects_id_str = ', '.join(map(str, ids_list))
 
 
         except Exception as e:
@@ -68,8 +60,26 @@ class DatabaseConnector:
 
 
     def get_objects_count(self):
+        
         return self.objects_count
         
+
+    def get_fields(self, limit):
+        """
+        Returns the fields of the table.
+        """
+        try:
+            query = f"SELECT startTimestamp({self.tpoint_column_name}), endTimestamp({self.tpoint_column_name}) FROM public.{self.table_name} ORDER BY id LIMIT {limit};"
+            self.cursor.execute(query)
+            results= []
+            while True:
+                rows = self.cursor.fetchmany(1000)
+                if not rows:
+                    break
+                results.extend(rows)
+            return results
+        except Exception as e:
+            self.log(f"Error in get_fields : {e}")
 
     def get_min_timestamp(self):
         """

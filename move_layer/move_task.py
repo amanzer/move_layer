@@ -15,20 +15,23 @@ class Matrix_generation_thread(QgsTask):
     """
     This thread creates next time delta's the matrix containing the positions for all objects to show. 
     """
-    def __init__(self, description,project_title, beg_frame, end_frame, objects_id_str, extent, timestamps, time_delta_size, connection_params, granularity_enum, srid, create_matrix_fnc, finished_fnc, failed_fnc):
+    def __init__(self, description,project_title, beg_frame, end_frame, start_date, p_start, p_end, time_delta_size, connection_params, granularity_enum, srid, total_tpoints,  create_matrix_fnc, finished_fnc, failed_fnc):
         super(Matrix_generation_thread, self).__init__(description, QgsTask.CanCancel)
 
         self.project_title = project_title
 
         self.begin_frame = beg_frame
         self.end_frame = end_frame
-        self.objects_id_str = objects_id_str
-        self.extent = extent
-        self.timestamps = timestamps
+
+        self.start_date = start_date
+        self.p_start = p_start
+        self.p_end = p_end
         self.time_delta_size = time_delta_size
         self.connection_params = connection_params
         self.granularity_enum = granularity_enum
         self.srid = srid
+    
+        self.total_tpoints = total_tpoints
         self.create_matrix = create_matrix_fnc
         self.finished_fnc = finished_fnc
         self.failed_fnc = failed_fnc
@@ -52,22 +55,23 @@ class Matrix_generation_thread(QgsTask):
         Runs the new process to create the matrix for the given time delta.
         """
         try:
+        
             pid = os.getpid()
             self.log(f"pid : {pid} QgisThread run |  CPU affinity : {psutil.Process(pid).cpu_affinity()} \n") 
             
-           
+        
             result_queue = multiprocessing.Queue()
             
             # self.log(f"arguments : begin_frame : {self.begin_frame}, end_frame : {self.end_frame}, TIME_DELTA_SIZE : {TIME_DELTA_SIZE}, PERCENTAGE_OF_OBJECTS : {PERCENTAGE_OF_OBJECTS}, {self.extent}, len timestamps :{len(self.timestamps)}, granularity : {GRANULARITY.value},{len(self.objects_id_str)}")
-            process = multiprocessing.Process(target=self.create_matrix, args=(result_queue, self.begin_frame, self.end_frame, self.time_delta_size, self.extent, self.timestamps, self.connection_params,  self.granularity_enum, self.srid, self.objects_id_str))
-            process.start()
+            process = multiprocessing.Process(target=self.create_matrix, args=(result_queue, self.begin_frame, self.end_frame, self.time_delta_size, self.start_date, self.p_start, self.p_end, self.connection_params,  self.granularity_enum, self.srid, self.total_tpoints))
+            process.start()                                                
             # self.log(f"Process started")
-           
+        
             return_value = result_queue.get()
             if return_value == 1:
                 error = result_queue.get()
                 self.log(f"Error inside new process: {error}")
-                self.log(result_queue.get())
+                self.log(f"log for error: {result_queue.get()}")
                 self.result_params = {
                     'matrix' : result_matrix
                 }
@@ -84,6 +88,7 @@ class Matrix_generation_thread(QgsTask):
                 self.result_params = {
                     'matrix' : result_matrix
                 }
+     
         except Exception as e:
             self.log(f"Error in run method : {e}")
             self.error_msg = str(e)

@@ -38,9 +38,7 @@ class MoveLayerController:
         """
         Creates a Qgis Vector layer in memory to store the points to be displayed on the map.
         """
-        self.canvas.setDestinationCrs(QgsCoordinateReferenceSystem(f"EPSG:{self.srid}")) # TODO : not needed
-
-        self.vlayer = QgsVectorLayer("Point", "MobilityBD Data", "memory")
+        self.vlayer = QgsVectorLayer(f"Point?crs=epsg:{self.srid}", "MobilityBD Data", "memory")
         pr = self.vlayer.dataProvider()
         pr.addAttributes([QgsField("start_time", QVariant.DateTime), QgsField("end_time", QVariant.DateTime)])
         self.vlayer.updateFields()
@@ -105,6 +103,7 @@ class MoveLayerController:
             self.vlayer.dataProvider().addFeatures(features_list)
 
     def set_fps(self, fps):
+        self.log(f"set_FPS : {fps}, min between {fps} and {self.fps_cap}")
         self.fps = min(fps, self.fps_cap)
 
     def set_fps_cap(self, fps):
@@ -154,15 +153,3 @@ class MoveLayerController:
         """
         QgsMessageLog.logMessage(msg, f'Framerate', level=Qgis.Info)
 
-    # def delete_vlayer(self):
-    #     start_tdelta_key = self.handler.get_current_time_delta_key()
-    #     start_frame = self.handler.get_last_frame()
-
-    #     self.handler.delete()
-        
-    #     self.create_vlayer()
-    #     self.set_temporal_controller_frame_number(start_frame)
-    #     self.extent = self.canvas.extent().toRectF().getCoords()
-
-    #     self.handler = Time_deltas_handler(self, (start_tdelta_key ,start_frame))
-    #     self.fps_record = []
