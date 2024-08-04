@@ -77,7 +77,7 @@ def worker_fnc(args):
         dtype = object
         chunk_matrix = np.full((len(rows), time_delta_size), empty_point_wkb, dtype=dtype)
         logs = f"pid : {pid} assigned to cpu : {cpus} \n"
-
+    
         for i in range(len(rows)):
             if rows[i][2] is not None:
                 try:
@@ -95,7 +95,7 @@ def worker_fnc(args):
         return 0, chunk_matrix, logs
     except Exception as e:
         err = traceback.format_exc()
-        return 1, None, f"Error in worker: {e} - {err} \n"
+        return 1, None, f"Error in worker: {e} - {err} \n logs : {logs}"
 
 
     

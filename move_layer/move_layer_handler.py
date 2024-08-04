@@ -22,7 +22,7 @@ import math
 import time 
 import psutil
 import os 
-
+import pickle
 
 class MoveLayerHandler:
     """
@@ -68,7 +68,6 @@ class MoveLayerHandler:
         self.current_matrix = None
         self.next_matrix = None
         
-        self.objects_count = self.db.get_objects_count()
         self.pid = os.getpid()
 
         if self.multicores: 
@@ -248,8 +247,20 @@ class MoveLayerHandler:
         frame_number = self.move_layer_controller.get_current_frame_number()
         if self.previous_frame - frame_number <= 0:
             self.direction = 1 # Forward
-            if frame_number >= self.total_frames: # Reached the end of the animation, pause
+            # if frame_number >= self.total_frames: # Reached the end of the animation, pause
+                # self.move_layer_controller.pause()
+            if frame_number == 120: 
                 self.move_layer_controller.pause()
+
+                with open('multicores_onf_record.pkl', 'wb') as f:
+                    pickle.dump(self.onf_record, f)
+                
+                with open("multicores_fps_record.pkl", 'wb') as f:
+                    pickle.dump(self.move_layer_controller.fps_record, f)
+
+                with open("multicores_matrix_cap_record.pkl", 'wb') as f:
+                    pickle.dump(self.move_layer_controller.matrix_cap_record, f)
+
         else:
             self.direction = 0
             if frame_number <= 0: # Reached the beginning of the animation, pause

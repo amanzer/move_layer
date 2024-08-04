@@ -96,19 +96,19 @@ import gc
 
 
 PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentage of the ships in the database
-TIME_DELTA_SIZE = 60  # Number of frames associated to one Time delta
-FPS = 60
+TIME_DELTA_SIZE = 30  # Number of frames associated to one Time delta
+FPS = 100
 
 LIMIT = 700000
 
 # DATASETS 
 ########## AIS Danish maritime dataset ##########
-# SRID = 4326
-# DATABASE_NAME = "mobilitydb"
-# TPOINT_TABLE_NAME = "PyMEOS_demo"
-# TPOINT_ID_COLUMN_NAME = "MMSI"
-# TPOINT_COLUMN_NAME = "trajectory"
-# GRANULARITY = Time_granularity.set_time_step(1).MINUTE
+SRID = 4326
+DATABASE_NAME = "mobilitydb"
+TPOINT_TABLE_NAME = "PyMEOS_demo"
+TPOINT_ID_COLUMN_NAME = "MMSI"
+TPOINT_COLUMN_NAME = "trajectory"
+GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 
 ########## AIS Danish maritime dataset ##########
 # SRID = 25832  
@@ -119,12 +119,12 @@ LIMIT = 700000
 # GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 
 ########## LIMA PERU drivers dataset ##########
-SRID = 4326
-DATABASE_NAME = "lima_demo"
-TPOINT_TABLE_NAME = "driver_paths"
-TPOINT_ID_COLUMN_NAME = "driver_id"
-TPOINT_COLUMN_NAME = "trajectory"
-GRANULARITY = Time_granularity.set_time_step(5).SECOND
+# SRID = 4326
+# DATABASE_NAME = "lima_demo"
+# TPOINT_TABLE_NAME = "driver_paths"
+# TPOINT_ID_COLUMN_NAME = "driver_id"
+# TPOINT_COLUMN_NAME = "trajectory"
+# GRANULARITY = Time_granularity.set_time_step(5).SECOND
 
 ######## STIB dataset ##########
 # SRID = 3857

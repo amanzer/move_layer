@@ -27,18 +27,11 @@ class DatabaseConnector:
             # x_min,y_min, x_max, y_max = extent
             self.cursor = self.connection.cursor()
 
-            query_check_column = f"""
-                                    SELECT column_name
-                                    FROM information_schema.columns
-                                    WHERE table_name='{self.table_name}' AND column_name='id';
-                                    """
-            self.cursor.execute(query_check_column)
-            column_exists = self.cursor.fetchone()
-            if not column_exists:
-                query_create_id = f""" ALTER TABLE public.{self.table_name} ADD COLUMN id SERIAL UNIQUE;"""
-                self.cursor.execute(query_create_id)
-                query_create_index = f""" CREATE INDEX idx_id ON public.{self.table_name} (id); """
-                self.cursor.execute(query_create_index)
+
+            # query_create_id = f""" ALTER TABLE public.{self.table_name} ADD COLUMN id SERIAL UNIQUE;"""
+            # self.cursor.execute(query_create_id)
+            # query_create_index = f""" CREATE INDEX idx_id ON public.{self.table_name} (id); """
+            # self.cursor.execute(query_create_index)
 
             query_index = f""" SELECT max(id) FROM public.{self.table_name}; """
             self.cursor.execute(query_index)

@@ -31,6 +31,7 @@ class MoveLayerController:
         self.fps = FPS
 
         self.fps_record = []
+        self.matrix_cap_record = []
         
  
 
@@ -104,6 +105,7 @@ class MoveLayerController:
 
     def set_fps(self, fps):
         self.log(f"set_FPS : {fps}, min between {fps} and {self.fps_cap}")
+        self.matrix_cap = fps
         self.fps = min(fps, self.fps_cap)
 
     def set_fps_cap(self, fps):
@@ -141,6 +143,7 @@ class MoveLayerController:
         self.temporalController.setFramesPerSecond(fps)
         self.log(f"FPS : {fps}      |      ONF : {optimal_fps}      |      Matrix {self.fps}")
         self.fps_record.append(fps)
+        self.matrix_cap_record.append(self.matrix_cap)
 
 
     
