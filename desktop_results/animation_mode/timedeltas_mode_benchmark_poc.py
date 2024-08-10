@@ -27,22 +27,22 @@ import time
 from shapely.geometry import Point
 import pickle
 
-LIMIT = 100000
-TIME_DELTA_SIZE = 30
+LIMIT = 582
+TIME_DELTA_SIZE = 5
 
 
 # # ########## AIS Danish maritime dataset ##########
-# DATABASE_NAME = "mobilitydb"
-# TPOINT_TABLE_NAME = "PyMEOS_demo"
-# TPOINT_ID_COLUMN_NAME = "MMSI"
-# TPOINT_COLUMN_NAME = "trajectory"
+DATABASE_NAME = "mobilitydb"
+TPOINT_TABLE_NAME = "PyMEOS_demo"
+TPOINT_ID_COLUMN_NAME = "MMSI"
+TPOINT_COLUMN_NAME = "trajectory"
 
 
 # ######## AIS Danish maritime dataset ##########
-DATABASE_NAME = "stib"
-TPOINT_TABLE_NAME = "trips_mdb"
-TPOINT_ID_COLUMN_NAME = "trip_id"
-TPOINT_COLUMN_NAME = "trip"
+# DATABASE_NAME = "stib"
+# TPOINT_TABLE_NAME = "trips_mdb"
+# TPOINT_ID_COLUMN_NAME = "trip_id"
+# TPOINT_COLUMN_NAME = "trip"
 
 
 class Waiting_tdelta:
@@ -643,13 +643,13 @@ class Move:
 
 
     def save_fps(self):
-        with open(f"stib_{LIMIT}_desktop_interactive_mode_fps_record.pkl", "wb") as f:
+        with open(f"ais_582_{LIMIT}_laptop_timedeltas_mode_fps_record.pkl", "wb") as f:
             pickle.dump(self.fps_record, f)
         
-        with open(f"stib_{LIMIT}_desktop_interactive_mode_onf_record.pkl", "wb") as f:
+        with open(f"ais_582_{LIMIT}_laptop_timedeltas_mode_onf_record.pkl", "wb") as f:
             pickle.dump(self.onf_record, f)
         
-        with open(f"stib_{LIMIT}_desktop_interactive_mode_matrix_cap_record.pkl", "wb") as f:
+        with open(f"ais_582_{LIMIT}_laptop_timedeltas_mode_matrix_cap_record.pkl", "wb") as f:
             pickle.dump(self.matrix_cap_record, f)
 
         print("FPS saved")
