@@ -99,16 +99,16 @@ PERCENTAGE_OF_OBJECTS = 1 # To not overload the memory, we only take a percentag
 TIME_DELTA_SIZE = 30  # Number of frames associated to one Time delta
 FPS = 100
 
-LIMIT = 700000
+LIMIT = 500000
 
 # DATASETS 
 ########## AIS Danish maritime dataset ##########
-SRID = 4326
-DATABASE_NAME = "mobilitydb"
-TPOINT_TABLE_NAME = "PyMEOS_demo"
-TPOINT_ID_COLUMN_NAME = "MMSI"
-TPOINT_COLUMN_NAME = "trajectory"
-GRANULARITY = Time_granularity.set_time_step(1).MINUTE
+# SRID = 4326
+# DATABASE_NAME = "mobilitydb"
+# TPOINT_TABLE_NAME = "PyMEOS_demo"
+# TPOINT_ID_COLUMN_NAME = "MMSI"
+# TPOINT_COLUMN_NAME = "trajectory"
+# GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 
 ########## AIS Danish maritime dataset ##########
 # SRID = 25832  
@@ -127,12 +127,12 @@ GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 # GRANULARITY = Time_granularity.set_time_step(5).SECOND
 
 ######## STIB dataset ##########
-# SRID = 3857
-# DATABASE_NAME = "stib"
-# TPOINT_TABLE_NAME = "trips_mdb"
-# TPOINT_ID_COLUMN_NAME = "trip_id"
-# TPOINT_COLUMN_NAME = "trip"
-# GRANULARITY = Time_granularity.set_time_step(1).MINUTE
+SRID = 3857
+DATABASE_NAME = "stib"
+TPOINT_TABLE_NAME = "trips_mdb"
+TPOINT_ID_COLUMN_NAME = "trip_id"
+TPOINT_COLUMN_NAME = "trip"
+GRANULARITY = Time_granularity.set_time_step(1).MINUTE
 
 
 
@@ -335,7 +335,7 @@ class Move:
             self.dockwidget.button_help.clicked.connect(self.show_help)
             self.dockwidget.button_execute.clicked.connect(self.execute)
             self.dockwidget.button_refresh.clicked.connect(self.refresh)
-            self.dockwidget.spinbox_integer.valueChanged.connect(self.number_changed)
+            # self.dockwidget.spinbox_integer.valueChanged.connect(self.number_changed)
             self.project_title = QgsProject.instance().title().lower().replace(" ", "_")
             self.setDatabaseComboBox()
             self.setFPSComboBox()

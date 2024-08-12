@@ -53,30 +53,25 @@
        </widget>
       </item>
       <item>
-       <widget class="QSpinBox" name="spinbox_integer">
+    <widget class="QCheckBox" name="checkbox_automatic_fps">
+        <property name="text">
+            <string>Automatic FPS</string>
+        </property>
         <property name="sizePolicy">
-         <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-          <horstretch>0</horstretch>
-          <verstretch>0</verstretch>
-         </sizepolicy>
+            <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+                <horstretch>0</horstretch>
+                <verstretch>0</verstretch>
+            </sizepolicy>
         </property>
         <property name="minimumSize">
-         <size>
-          <width>100</width>
-          <height>0</height>
-         </size>
+            <size>
+                <width>100</width>
+                <height>0</height>
+            </size>
         </property>
-        <property name="minimum">
-         <number>0</number>
-        </property>
-        <property name="maximum">
-         <number>50000</number>
-        </property>
-        <property name="value">
-         <number>10000</number>
-        </property>
-       </widget>
-      </item>
+    </widget>
+</item>
+
      </layout>
     </item>
     <item row="1" column="0">
