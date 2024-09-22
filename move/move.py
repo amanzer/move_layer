@@ -50,6 +50,31 @@ from .move_dockwidget import MoveDockWidget
 from .move_query import MoveQuery
 from .move_task import MoveGeomTask
 from .move_task import MoveTTask
+from .move_task import FetchDataThread
+
+from pymeos.db.psycopg import MobilityDB
+from pymeos import *
+import time
+from shapely.geometry import Point
+import pickle
+
+
+from qgis.PyQt.QtCore import QVariant
+
+from qgis.core import (
+    Qgis,
+    QgsVectorLayerTemporalProperties,
+    QgsFeature,
+    QgsGeometry,
+    QgsVectorLayer, 
+    QgsField, 
+    QgsProject,
+    QgsTemporalNavigationObject,
+    QgsTaskManager,
+    QgsTask,
+    QgsMessageLog,    
+)
+from PyQt5.QtCore import QDateTime
 
 
 class Move:
@@ -200,7 +225,6 @@ class Move:
             self.onDbChanged)
         self.dockwidget.button_execute.clicked.disconnect(self.execute)
         self.dockwidget.button_refresh.clicked.disconnect(self.refresh)
-
         # remove this statement if dockwidget is to remain
         # for reuse if plugin is reopened
         # Commented next statement since it causes QGIS crashe
@@ -247,10 +271,77 @@ class Move:
             self.project_title = QgsProject.instance().title().lower().replace(" ", "_")
             self.setDatabaseComboBox()
 
+            self.dockwidget.checkbox_interactive_mode.toggled.connect(self.onInteractiveModeToggled)
+            self.dockwidget.checkbox_automatic_fps.toggled.connect(self.onAutomaticFpsToggled)
+
+            self.dockwidget.fps_input.textChanged.connect(self.onFpsInputChanged)
+            self.updateFpsInputState()
+
+
+            self.is_interactive_mode_active = True
+            self.automatic_fps = True
+            self.fps_cap = 100
+            
+            pymeos_initialize()
+            self.mobilitydb_layers = []
+            self.canvas = self.iface.mapCanvas()
+            self.temporal_controller = self.canvas.temporalController()
+
+            # Set the initial navigation mode to animated
+            self.navigationMode = QgsTemporalNavigationObject.NavigationMode.Animated
+            self.temporal_controller.setNavigationMode(self.navigationMode)
+
+            # Retrieve initial temporal settings
+            self.frameDuration = self.temporal_controller.frameDuration()
+            self.temporalExtents = self.temporal_controller.temporalExtents()
+            self.total_frames = self.temporal_controller.totalFrameCount()
+            self.cumulativeRange = self.temporal_controller.temporalRangeCumulative()
+            self.frame = 0
+
+
+            self.temporal_controller.updateTemporalRange.connect(self.on_new_frame)
+
+
             # show the dockwidget
             # TODO: fix to allow choice of dock location
             self.iface.addDockWidget(Qt.BottomDockWidgetArea, self.dockwidget)
             self.dockwidget.show()
+
+    def onInteractiveModeToggled(self, checked):
+        """Handle toggling of interactive mode checkbox"""
+        # Add logic here for when interactive mode checkbox is toggled
+        if checked:
+            self.log('"INTERACTIVE MODE ACTIVATED')
+            self.is_interactive_mode_active = True
+        else:
+            self.log('"INTERACTIVE MODE DEACTIVATED')
+            self.is_interactive_mode_active = False
+
+    def onAutomaticFpsToggled(self, checked):
+        """Handle toggling of automatic FPS checkbox"""
+        self.log("automatic FPS button pressed")
+        self.updateFpsInputState()
+        
+
+    def onFpsInputChanged(self, text):
+        """Handle changes to the FPS input field"""
+        # Add logic here for when the FPS input field changes
+        self.log(f"SETTING FPS CAP TO : {text}")
+        if text.isnumeric():
+            if int(text) > 1 and int(text) <= 100:
+                self.fps_cap = int(text)
+                self.log(f"New fps cap : {int(text)}")
+
+
+    def updateFpsInputState(self):
+        """Update the state of the FPS input field based on the automatic FPS checkbox, 
+            if checked allow user to cap FPS"""
+        if self.dockwidget.checkbox_automatic_fps.isChecked():
+            self.dockwidget.fps_input.setEnabled(True)
+            self.automatic_fps = True
+        else:
+            self.dockwidget.fps_input.setEnabled(False)  
+            self.automatic_fps = False
 
     def setDatabaseComboBox(self):
         self.dockwidget.combo_database.clear()
@@ -386,11 +477,33 @@ class Move:
                     task = MoveTTask(f"Move: Creating tgeom view {col}", query,
                                      self.project_title, self.db, col,
                                      self.add_tgeom_layer, self.raise_error)
+                    self.tm.addTask(task)
                 else:
-                    task = MoveTTask(f"Move: Creating tpoint view {col}",
-                                     query, self.project_title, self.db, col,
-                                     self.add_tpoint_layer, self.raise_error)
-                self.tm.addTask(task)
+                    if self.is_interactive_mode_active:
+                        """
+                        Add a mobilitydb layer into self.mobilitydb layers list
+                        """
+                        column_name, table_name, limit = query.get_spatiotemporal_columns(col)
+                        connection_parameters = {
+                                'host': self.db["host"],
+                                'port': self.db["port"],
+                                'dbname': self.db["database"],
+                                'user': self.db["username"],
+                                'password': self.db["password"],
+                                'table_name': table_name,
+                                'tpoint_column_name': column_name,
+                            }
+                        
+                        self.log(f"connection parameters {connection_parameters}, limit : {limit}")
+
+                        self.mobilitydb_layers.append(MobilitydbLayerHandler(self.mobilitydb_layers, self.iface, self.tm, limit, connection_parameters))
+                        
+
+                    else:
+                        task = MoveTTask(f"Move: Creating tpoint view {col}",
+                                        query, self.project_title, self.db, col,
+                                        self.add_tpoint_layer, self.raise_error)
+                        self.tm.addTask(task)
 
     def raise_error(self, msg):
         if msg:
@@ -469,8 +582,357 @@ class Move:
             layer.setCustomProperty('move/sql', query.raw_sql)
             layer.temporalProperties().setIsActive(True)
 
+    #--------------------------------------------------------------------------
+    # Methods to manage temporal Controller signal
+    #--------------------------------------------------------------------------
+    
+    def on_new_frame(self) -> None:
+        """
+        Handle the event when a new frame is displayed during the animation.
+
+        This method handles the signal emitted by the temporal controller , either when a new frame 
+        is displayed or when the temporal controller settings are changed.
+        """
+        if self.navigationMode == QgsTemporalNavigationObject.NavigationMode.Animated :
+            recommended_fps_time = time.time()
+
+            next_frame = self.frame + 1
+            previous_frame = self.frame - 1
+            current_frame = self.temporal_controller.currentFrameNumber()
+
+            if current_frame == next_frame or current_frame == previous_frame:
+                self.frame = current_frame
+                for layer in self.mobilitydb_layers:
+                    layer.new_frame(self.temporal_controller.dateTimeRangeForFrameNumber(current_frame).begin().toPyDateTime())
+                
+                fps = 1 / (time.time() - recommended_fps_time)
+                self.log(f"FPS: {fps}")
+                if self.automatic_fps:
+                    final_fps = min(fps, self.fps_cap)
+                    self.temporal_controller.setFramesPerSecond(final_fps)
+            else:
+                self.frame = current_frame
+                self.temporal_controller_state_change_signal()
+        else:
+            self.iface.messageBar().pushMessage("Warning", "Interactive Mode only supports Animated Mode for the moment", level=Qgis.Warning)
+
+    def temporal_controller_state_change_signal(self) -> None:
+        """
+        Handle the signal emitted when the temporal controller settings are changed.
+        """
+        if self.temporal_controller.navigationMode() != self.navigationMode: 
+            if self.temporal_controller.navigationMode() == QgsTemporalNavigationObject.NavigationMode.Animated:
+                self.navigationMode = QgsTemporalNavigationObject.NavigationMode.Animated
+                self.log("Navigation Mode : Animated")
+            elif self.temporal_controller.navigationMode() == QgsTemporalNavigationObject.NavigationMode.Disabled:
+                self.navigationMode = QgsTemporalNavigationObject.NavigationMode.Disabled
+                self.log("Navigation Mode : Disabled")
+            elif self.temporal_controller.navigationMode() == QgsTemporalNavigationObject.NavigationMode.Movie:
+                self.navigationMode = QgsTemporalNavigationObject.NavigationMode.Movie
+                self.log("Navigation Mode : Movie")
+            elif self.temporal_controller.navigationMode() == QgsTemporalNavigationObject.NavigationMode.FixedRange:
+                self.navigationMode = QgsTemporalNavigationObject.NavigationMode.Animated
+                self.log("Navigation Mode : FixedRange")
+        elif self.temporal_controller.frameDuration() != self.frameDuration:
+            self.frameDuration = self.temporal_controller.frameDuration()
+            self.total_frames = self.temporal_controller.totalFrameCount()
+            self.log(f"to {self.frameDuration} with {self.total_frames} frames")
+
+        elif self.temporal_controller.temporalExtents() != self.temporalExtents:
+            self.log(f"temporal extents have changed from {self.temporalExtents} with {self.total_frames} frames")
+            self.temporalExtents = self.temporal_controller.temporalExtents()
+            self.total_frames = self.temporal_controller.totalFrameCount()
+            self.log(f"to {self.temporalExtents} with {self.total_frames} frames")   
+        elif self.temporal_controller.temporalRangeCumulative() != self.cumulativeRange:
+            self.log(f"Cumulative range has changed from {self.cumulativeRange}")
+            self.cumulativeRange = self.temporal_controller.temporalRangeCumulative()
+            self.log(f"to {self.cumulativeRange}")
+        else:
+            self.log("Unhandled signal")
+
+
+
+
     def msg(self, msg):
         self.iface.messageBar().pushMessage(msg, level=Qgis.Info, duration=3)
 
     def log(self, msg):
         QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
+
+
+
+
+def log(msg):
+    QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
+
+
+class DatabaseController:
+    """
+    Singleton class to handle the MobilityDB connection.
+    """
+    def __init__(self, connection_parameters: dict, limit: input):
+        """
+        Initialize the DatabaseController with connection parameters.
+
+        :param connection_parameters: A dictionary containing database connection parameters.
+        """
+        try:
+            self.limit = limit
+            self.connection_params = {
+                "host": connection_parameters["host"],
+                "port": connection_parameters["port"],
+                "dbname": connection_parameters["dbname"],
+                "user": connection_parameters["user"],
+                "password": connection_parameters["password"],
+            }
+
+            self.table_name = connection_parameters["table_name"]
+            self.tpoint_column_name = connection_parameters["tpoint_column_name"]
+
+        except KeyError as e:
+            log(f"Missing connection parameter: {e}")
+            raise
+
+    def get_TgeomPoints(self) -> list:
+        """
+        Fetch TgeomPoints from the database.
+
+        :return: A list of TgeomPoints fetched from the database.
+        """
+        try:
+            query = (
+                f"SELECT {self.tpoint_column_name}, "
+                f"startTimestamp({self.tpoint_column_name}), "
+                f"endTimestamp({self.tpoint_column_name}) "
+                f"FROM public.{self.table_name} LIMIT {self.limit};"
+            )
+            log(f"Executing query: {query}")
+
+            self.connection = MobilityDB.connect(**self.connection_params)
+            self.cursor = self.connection.cursor()
+            self.cursor.execute(query)
+
+            results = []
+            while True:
+                rows = self.cursor.fetchmany(1000)
+                if not rows:
+                    break
+                results.extend(rows)
+
+
+            query_srid = f"SELECT SRID({self.tpoint_column_name}) FROM {self.table_name} LIMIT 1;"
+            log(f"Executing query: {query_srid}")
+
+            self.cursor.execute(query_srid)
+            srid = self.cursor.fetchone()[0]
+
+
+            self.cursor.close()
+            self.connection.close()
+
+            return results, srid
+
+        except Exception as e:
+            log(f"Error in fetching TgeomPoints: {e}")
+            return None
+
+
+
+class MobilitydbLayerHandler:
+    """
+    Initializes and handles the vector layer controller to display MobilityDB data.
+
+    This class manages the creation and updating of an in-memory vector layer in QGIS
+    that displays TgeomPoints data from a MobilityDB database. The data is fetched asynchronously
+    at the start of the script and updated in real-time as the temporal controller advances.
+    """
+
+    def __init__(self, layers_list, iface, task_manager, limit: int, connection_parameters: dict):
+        """
+        Initialize the MobilitydbLayerHandler.
+
+        :param iface: The QGIS interface instance.
+        :param task_manager: The QGIS task manager instance for managing background tasks.
+        :param srid: The spatial reference ID (SRID) for the vector layer's coordinate system.
+        :param connection_parameters: A dictionary containing database connection parameters.
+        """
+        self.mobilitydb_layers_list = layers_list
+        self.iface = iface
+        self.task_manager = task_manager
+        
+        self.database_controller = DatabaseController(connection_parameters, limit)
+
+        self.last_time_record = time.time()
+
+        # Start a background task to fetch data from the MobilityDB database
+        self.fetch_data_task = FetchDataThread(
+            description="Fetching MobilityDB Data",
+            project_title="Move",
+            database_connector=self.database_controller,
+            finished_fnc=self.on_fetch_data_finished,
+            failed_fnc=self.raise_error
+        )
+        self.task_manager.addTask(self.fetch_data_task)
+
+    def raise_error(self, msg: str) -> None:
+        """
+        Called when the task to fetch data from the MobilityDB database fails.
+
+        :param msg: The error message.
+        """
+        if msg:
+            log("Error: " + msg)
+        else:
+            log("Unknown error")
+
+    def on_fetch_data_finished(self, result_params: dict) -> None:
+        """
+        Callback function that is called when the data fetch task is completed.
+        This creates the QGIS Features associated to each trajecotry and adds them to the vector layer.
+
+        :param result_params: A dictionary containing the trajectories.
+        """
+        try:
+            self.TIME_fetch_tgeompoints = time.time() - self.last_time_record
+            results = result_params.get('TgeomPoints_list', [])
+            log(f"Number of results: {len(results[0])}")
+
+            srid = results[1]
+            log(f"srid:  {srid}")
+            self.vector_layer_controller = VectorLayerController(srid)
+            vlayer_fields = self.vector_layer_controller.get_vlayer_fields()
+
+            features_list = []
+            self.geometries = {}
+            self.tpoints = {}
+            index = 1
+
+            for row in results[0]:
+                try:
+                    self.tpoints[index] = row[0]
+                    feature = QgsFeature(vlayer_fields)
+                    feature.setAttributes([index, QDateTime(row[1]), QDateTime(row[2])])
+
+                    geom = QgsGeometry()
+                    self.geometries[index] = geom
+                    feature.setGeometry(geom)
+                    features_list.append(feature)
+                    
+                    index += 1
+
+                except Exception as e:
+                    log(f"Error creating feature: {e} \nRow: {row} \nIndex: {index}")
+
+            # Add all features to the vector layer
+            self.vector_layer_controller.add_features(features_list)
+            self.objects_count = index - 1
+
+            log(f"Time taken to fetch TgeomPoints: {self.TIME_fetch_tgeompoints}")
+            log(f"Number of TgeomPoints fetched: {self.objects_count}")       
+
+            results = None  # Free memory
+            self.iface.messageBar().pushMessage("Info", "TGeomPoints have been loaded", level=Qgis.Info)
+
+        except Exception as e:
+            log(f"Error in on_fetch_data_finished: {e}")
+
+    def new_frame(self, timestamp: QDateTime) -> None:
+        """
+        Update the layer with new geometries corresponding to the given timestamp.
+
+        :param timestamp: The timestamp for which to update the layer's geometries.
+        """
+        try:
+            log(f"New Frame: {timestamp}")
+            visible_geometries = 0
+            empty_geom = Point().wkb
+
+            for i in range(1, self.objects_count + 1):
+                try:
+                    # Fetch the position of the object at the current timestamp
+                    position = self.tpoints[i].value_at_timestamp(timestamp)
+
+                    # Update the geometry of the feature in the vector layer
+                    self.geometries[i].fromWkb(position.wkb)
+                    visible_geometries += 1
+                except:
+                    # Set geometry to empty if position is not available
+                    self.geometries[i].fromWkb(empty_geom)
+
+            log(f"{visible_geometries} visible geometries")
+
+            # Update the geometries in the vector layer
+            self.vector_layer_controller.vlayer.startEditing()
+            self.vector_layer_controller.vlayer.dataProvider().changeGeometryValues(self.geometries)
+            self.vector_layer_controller.vlayer.commitChanges()
+        except Exception as e:
+            try:
+                if self.vector_layer_controller.vlayer:
+                    log(f"Error in new_frame: {e}")
+            except: # If the vector layer has been deleted remove it from the spatiotemporal layer's list
+                self.vector_layer_controller = None
+                self.mobilitydb_layers_list.remove(self)
+
+                
+
+
+class VectorLayerController:
+    """
+    Controller for an in-memory vector layer to view TgeomPoints.
+
+    This class creates and manages a in-memory vector layer within QGIS, specifically designed
+    to handle Spatial Points with temporal properties.
+    """
+
+    def __init__(self, srid: int):
+        """
+        Initialize the VectorLayerController with a given SRID.
+
+        :param srid: Spatial Reference Identifier (SRID) used to define the coordinate system.
+        """
+        # Create an in-memory vector layer with the specified SRID
+        self.vlayer = QgsVectorLayer(f"Point?crs=epsg:{srid}", f"MobilityDB layer - {uuid.uuid4().hex}", "memory")
+
+        # Define the fields for the vector layer
+        fields = [
+            QgsField("id", QVariant.Int),
+            QgsField("start_time", QVariant.DateTime),
+            QgsField("end_time", QVariant.DateTime)
+        ]
+        self.vlayer.dataProvider().addAttributes(fields)
+        self.vlayer.updateFields()
+
+        # Define the temporal properties of the vector layer
+        temporal_properties = self.vlayer.temporalProperties()
+        temporal_properties.setIsActive(True)
+        temporal_properties.setMode(QgsVectorLayerTemporalProperties.ModeFeatureDateTimeStartAndEndFromFields)
+        temporal_properties.setStartField("start_time")
+        temporal_properties.setEndField("end_time")
+
+        self.vlayer.updateFields()
+
+        # Add the vector layer to the QGIS project
+        QgsProject.instance().addMapLayer(self.vlayer)
+
+    def get_vlayer_fields(self):
+        """
+        Get the fields of the vector layer.
+
+        :return: A list of fields if the vector layer exists, otherwise None.
+        """
+        try:
+            return self.vlayer.fields()
+        except Exception as e:
+            log(f"Error in get_vlayer_fields: {e}")
+
+
+    def add_features(self, features_list: list):
+        """
+        Add features to the vector layer.
+
+        :param features_list: A list of QgsFeature objects to be added to the vector layer.
+        """
+        if self.vlayer:
+            self.vlayer.dataProvider().addFeatures(features_list)
+            self.vlayer.updateExtents()  # Update the layer's extent after adding features
+

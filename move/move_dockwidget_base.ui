@@ -15,6 +15,22 @@
   </property>
   <widget class="QWidget" name="dockWidgetContents">
    <layout class="QGridLayout" name="gridLayout">
+    <item row="0" column="0">
+     <widget class="QComboBox" name="combo_database">
+      <property name="sizePolicy">
+       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
+        <horstretch>0</horstretch>
+        <verstretch>0</verstretch>
+       </sizepolicy>
+      </property>
+      <property name="minimumSize">
+       <size>
+        <width>214</width>
+        <height>0</height>
+       </size>
+      </property>
+     </widget>
+    </item>
     <item row="1" column="0">
      <widget class="QPlainTextEdit" name="input_text">
       <property name="enabled">
@@ -81,6 +97,13 @@
        </widget>
       </item>
       <item>
+       <widget class="QCheckBox" name="checkbox_interactive_mode">
+        <property name="text">
+         <string>Interactive Mode</string>
+        </property>
+       </widget>
+      </item>
+      <item>
        <spacer name="horizontalSpacer">
         <property name="orientation">
          <enum>Qt::Horizontal</enum>
@@ -95,17 +118,27 @@
       </item>
      </layout>
     </item>
-    <item row="0" column="0">
-     <widget class="QComboBox" name="combo_database">
-      <property name="sizePolicy">
-       <sizepolicy hsizetype="Fixed" vsizetype="Fixed">
-        <horstretch>0</horstretch>
-        <verstretch>0</verstretch>
-       </sizepolicy>
+    <item row="3" column="0">
+     <widget class="QCheckBox" name="checkbox_automatic_fps">
+      <property name="text">
+       <string>Automatic FPS</string>
+      </property>
+     </widget>
+    </item>
+    <item row="4" column="0">
+     <widget class="QLineEdit" name="fps_input">
+      <property name="enabled">
+       <bool>false</bool> <!-- Initially disabled, will be enabled when checkbox is unchecked -->
+      </property>
+      <property name="placeholderText">
+       <string>Enter FPS (1-100)</string>
+      </property>
+      <property name="inputMask">
+       <string>000</string> <!-- Restrict input to numeric values (0-999) -->
       </property>
       <property name="minimumSize">
        <size>
-        <width>214</width>
+        <width>100</width>
         <height>0</height>
        </size>
       </property>

@@ -2,6 +2,21 @@ import psycopg
 import uuid
 
 
+from qgis.core import (
+    Qgis,
+    QgsVectorLayerTemporalProperties,
+    QgsFeature,
+    QgsGeometry,
+    QgsVectorLayer, 
+    QgsField, 
+    QgsProject,
+    QgsTemporalNavigationObject,
+    QgsTaskManager,
+    QgsTask,
+    QgsMessageLog,    
+)
+
+
 class MoveQuery:
     def __init__(self, raw_sql):
         super(MoveQuery, self).__init__()
@@ -179,6 +194,21 @@ class MoveQuery:
                     geom_types.append(col_geom_types)
                 conn.commit()
         return view_name, col_names, srids, geom_types
+
+
+    def get_spatiotemporal_columns(self, col_id):
+        """
+        Return :spatiotemporal column name, table name, LIMIT 
+        """
+        column_name = self.column_names[col_id]
+        table_name = self.rest_sql
+
+        limit = 500000
+        if self.has_limit:
+            limit = self.value_sql
+        
+        return column_name, table_name, limit
+
 
     def create_temporal_view(self, project_title, db, col_id):
         if self.column_types[col_id] == 'tgeometry':
@@ -391,3 +421,9 @@ class MoveQuery:
             return self.raw_sql
         else:
             return self.get_full_sql()
+        
+
+
+
+def log(msg):
+    QgsMessageLog.logMessage(msg, 'Move', level=Qgis.Info)
