@@ -203,7 +203,7 @@ class MoveQuery:
         column_name = self.column_names[col_id]
         table_name = self.rest_sql
 
-        limit = 500000
+        limit = 500000 # default limit
         if self.has_limit:
             limit = self.value_sql
         
